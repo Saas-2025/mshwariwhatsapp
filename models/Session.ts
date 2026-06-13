@@ -1,0 +1,46 @@
+import mongoose, { Document, Schema } from 'mongoose';
+
+export interface ISession extends Document {
+  id: string; // The session ID string (e.g. sess_123)
+  instanceId?: string; // Unique ID for the current running instance
+  name: string;
+  userId: string;
+  status: 'IDLE' | 'QR' | 'CONNECTED' | 'DISCONNECTED' | 'TERMINATED';
+  webhookUrl?: string; // Legacy
+  webhookUrls?: string[]; // Legacy (Keep for migration if needed, or deprecate)
+  webhooks?: { name: string; url: string }[]; // New: Named Webhooks
+  autoReplyEnabled?: boolean; // Toggles all auto-replies for this session
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+const WebhookSchema = new Schema({
+  name: { type: String, required: true },
+  url: { type: String, required: true }
+}, { _id: false });
+
+const SessionSchema = new Schema<ISession>({
+  id: { type: String, required: true, unique: true },
+  instanceId: { type: String },
+  name: { type: String, required: true },
+  userId: { type: String, required: true },
+  webhookUrl: { type: String }, // Legacy
+  webhookUrls: { type: [String], default: [] }, // Legacy
+  webhooks: {
+    type: [WebhookSchema],
+    default: []
+  },
+  status: {
+    type: String,
+    enum: ['IDLE', 'QR', 'CONNECTED', 'DISCONNECTED', 'TERMINATED'],
+    default: 'IDLE'
+  },
+  autoReplyEnabled: {
+    type: Boolean,
+    default: true
+  }
+}, {
+  timestamps: true
+});
+
+export const Session = mongoose.model<ISession>('Session', SessionSchema);
