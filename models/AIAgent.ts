@@ -35,7 +35,7 @@ const AIAgentSchema = new Schema<IAIAgent>({
   welcomeMessage: { type: String, default: 'مرحباً! كيف يمكنني مساعدتك اليوم؟' },
   systemPrompt: { type: String, default: 'أنت مساعد ذكي ومفيد. أجب على أسئلة المستخدمين بلطف واحترافية.' },
   temperature: { type: Number, default: 0.7 },
-  aiModel: { type: String, default: 'llama3-70b-8192' },
+  aiModel: { type: String, default: 'llama-3.3-70b-versatile' },
   isActive: { type: Boolean, default: false },
   fallbackToAI: { type: Boolean, default: false },
   knowledgeBase: { type: [KnowledgeEntrySchema], default: [] }

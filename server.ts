@@ -793,13 +793,13 @@ app.post('/api/aiagent', authenticateToken, async (req: any, res) => {
 app.put('/api/aiagent/toggle', authenticateToken, async (req: any, res) => {
     try {
         const { isActive, fallbackToAI } = req.body;
-        const existing = await storage.getItem('aiagent', { userId: req.user.userId });
-        if (!existing) return res.status(404).json({ error: 'AI Agent not configured yet' });
+        // Auto-create the agent (with schema defaults) if the user toggles before saving settings.
+        const existing = await storage.getItem('aiagent', { userId: req.user.userId })
+            || { userId: req.user.userId };
 
         if (isActive !== undefined) existing.isActive = isActive;
         if (fallbackToAI !== undefined) existing.fallbackToAI = fallbackToAI;
 
-        existing._id = existing._id;
         const saved = await storage.saveItem('aiagent', existing);
         res.json(saved);
     } catch (e: any) {
@@ -813,14 +813,15 @@ app.post('/api/aiagent/knowledge', authenticateToken, async (req: any, res) => {
         const { question, answer } = req.body;
         if (!question || !answer) return res.status(400).json({ error: 'Missing question or answer' });
 
-        const existing = await storage.getItem('aiagent', { userId: req.user.userId });
-        if (!existing) return res.status(404).json({ error: 'AI Agent not configured yet' });
-
         const { v4: uuidv4 } = await import('uuid');
         const entry = { id: uuidv4(), question, answer };
 
+        // Auto-create the agent if it doesn't exist yet, so knowledge can be added
+        // even before the user presses "Save settings".
+        const existing = await storage.getItem('aiagent', { userId: req.user.userId })
+            || { userId: req.user.userId, knowledgeBase: [] };
+
         existing.knowledgeBase = [...(existing.knowledgeBase || []), entry];
-        existing._id = existing._id;
         const saved = await storage.saveItem('aiagent', existing);
         res.json(saved);
     } catch (e: any) {

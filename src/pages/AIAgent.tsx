@@ -100,7 +100,7 @@ const AIAgent = () => {
     try {
       const token = localStorage.getItem('token');
       const baseUrl = (import.meta.env.VITE_API_URL || 'http://localhost:3050').replace(/\/$/, '');
-      await fetch(`${baseUrl}/api/aiagent/toggle`, {
+      const res = await fetch(`${baseUrl}/api/aiagent/toggle`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -108,6 +108,13 @@ const AIAgent = () => {
         },
         body: JSON.stringify({ isActive: newStatus })
       });
+      if (!res.ok) {
+        // Revert and tell the user instead of silently showing a wrong state
+        setConfig(prev => ({ ...prev, isActive: !newStatus }));
+        const err = await res.text();
+        setMessage({ type: 'error', text: `❌ فشل تغيير حالة البوت: ${err}` });
+        setTimeout(() => setMessage(null), 5000);
+      }
     } catch (error) {
       setConfig(prev => ({ ...prev, isActive: !newStatus }));
     }
@@ -128,12 +135,18 @@ const AIAgent = () => {
       });
       if (res.ok) {
         const saved = await res.json();
-        setConfig(saved);
+        // Merge only the knowledge list so unsaved edits in the form aren't lost
+        setConfig(prev => ({ ...prev, _id: saved._id, knowledgeBase: saved.knowledgeBase || [] }));
         setNewQuestion('');
         setNewAnswer('');
+      } else {
+        const err = await res.text();
+        setMessage({ type: 'error', text: `❌ فشل إضافة المعرفة: ${err}` });
+        setTimeout(() => setMessage(null), 5000);
       }
-    } catch (error) {
-      console.error('Failed to add knowledge', error);
+    } catch (error: any) {
+      setMessage({ type: 'error', text: `❌ خطأ في الشبكة: ${error.message}` });
+      setTimeout(() => setMessage(null), 5000);
     }
   };
 
@@ -147,7 +160,7 @@ const AIAgent = () => {
       });
       if (res.ok) {
         const saved = await res.json();
-        setConfig(saved);
+        setConfig(prev => ({ ...prev, knowledgeBase: saved.knowledgeBase || [] }));
       }
     } catch (error) {
       console.error('Failed to delete knowledge', error);
