@@ -28,7 +28,7 @@ const DEFAULT_CONFIG: AIAgentConfig = {
   welcomeMessage: 'مرحباً! كيف يمكنني مساعدتك اليوم؟',
   systemPrompt: 'أنت مساعد ذكي ومفيد.',
   temperature: 0.7,
-  aiModel: 'llama3-70b-8192',
+  aiModel: 'llama-3.3-70b-versatile',
   isActive: false,
   fallbackToAI: false,
   knowledgeBase: []
@@ -154,7 +154,13 @@ const AIAgent = () => {
     }
   };
 
-  const models = ['llama3-70b-8192', 'llama3-8b-8192', 'mixtral-8x7b-32768', 'gemma2-9b-it', 'llama-3.1-70b-versatile', 'llama-3.1-8b-instant'];
+  // Groq production models (Jun 2026). Older models like llama3-70b-8192 / mixtral were decommissioned.
+  const models = [
+    { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B — الأذكى (موصى به)' },
+    { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B — الأسرع' },
+    { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B' },
+    { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B' },
+  ];
 
   if (loading) {
     return (
@@ -221,7 +227,11 @@ const AIAgent = () => {
                 onChange={e => setConfig(prev => ({ ...prev, aiModel: e.target.value }))}
                 className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl focus:outline-none focus:border-emerald-500"
               >
-                {models.map(m => <option key={m} value={m}>{m}</option>)}
+                {models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                {/* Keep the saved value selectable even if it's an old/custom model */}
+                {!models.some(m => m.id === config.aiModel) && config.aiModel && (
+                  <option value={config.aiModel}>{config.aiModel} (قديم)</option>
+                )}
               </select>
             </div>
           </div>

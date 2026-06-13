@@ -772,7 +772,7 @@ app.post('/api/aiagent', authenticateToken, async (req: any, res) => {
             welcomeMessage: welcomeMessage || 'مرحباً! كيف يمكنني مساعدتك؟',
             systemPrompt: systemPrompt || 'أنت مساعد ذكي ومفيد.',
             temperature: temperature ?? 0.7,
-            aiModel: aiModel || 'llama3-70b-8192',
+            aiModel: aiModel || 'llama-3.3-70b-versatile',
             isActive: isActive ?? (existing?.isActive ?? false),
             fallbackToAI: fallbackToAI ?? (existing?.fallbackToAI ?? false),
             knowledgeBase: knowledgeBase || existing?.knowledgeBase || []

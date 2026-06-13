@@ -2,6 +2,16 @@ import { IAIAgent } from '../models/AIAgent.js';
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
+// Groq decommissioned several models. Auto-map any stored deprecated model to a
+// current one so existing AI agents keep replying without manual reconfiguration.
+const MODEL_MIGRATIONS: Record<string, string> = {
+  'llama3-70b-8192': 'llama-3.3-70b-versatile',
+  'llama3-8b-8192': 'llama-3.1-8b-instant',
+  'mixtral-8x7b-32768': 'llama-3.3-70b-versatile',
+  'llama-3.1-70b-versatile': 'llama-3.3-70b-versatile',
+  'gemma2-9b-it': 'llama-3.1-8b-instant',
+};
+
 export async function getAIResponse(
   agent: IAIAgent,
   userMessage: string
@@ -42,7 +52,7 @@ export async function getAIResponse(
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: agent.aiModel || 'llama3-70b-8192',
+        model: MODEL_MIGRATIONS[agent.aiModel] || agent.aiModel || 'llama-3.3-70b-versatile',
         messages: [
           { role: 'system', content: systemContent },
           { role: 'user', content: userMessage }

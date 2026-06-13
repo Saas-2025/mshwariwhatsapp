@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Bot, MessageSquare, Terminal, Smartphone, Edit2, Image as ImageIcon, Video, FileText, Mic } from 'lucide-react';
+import { Plus, Trash2, Bot, MessageSquare, Terminal, Smartphone, Edit2, Image as ImageIcon, Video, FileText, Mic, X } from 'lucide-react';
 
 interface AutoReplyRule {
     _id: string;
@@ -52,7 +52,7 @@ const AutoReply: React.FC<AutoReplyProps> = ({ socket }) => {
     const fetchRules = async () => {
         try {
             const token = localStorage.getItem('token');
-            const baseUrl = import.meta.env.VITE_API_URL.replace(/\/$/, '');
+            const baseUrl = (import.meta.env.VITE_API_URL || 'http://localhost:3050').replace(/\/$/, '');
             const res = await fetch(`${baseUrl}/api/autoreply`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
@@ -106,18 +106,17 @@ const AutoReply: React.FC<AutoReplyProps> = ({ socket }) => {
             if (res.ok) {
                 closeModal();
                 fetchRules();
-                // alert(editId ? 'Rule updated successfully!' : 'Rule created successfully!');
             } else {
                 const text = await res.text();
                 try {
                     const errData = JSON.parse(text);
-                    alert(`Error: ${errData.error || 'Failed to save rule'}`);
+                    alert(`خطأ: ${errData.error || 'فشل حفظ القاعدة'}`);
                 } catch (e) {
-                    alert(`Server Error: ${text}`);
+                    alert(`خطأ في السيرفر: ${text}`);
                 }
             }
         } catch (error) {
-            alert(`Network Error: ${error}`);
+            alert(`خطأ في الشبكة: ${error}`);
         }
     };
 
@@ -132,7 +131,7 @@ const AutoReply: React.FC<AutoReplyProps> = ({ socket }) => {
     };
 
     const handleDelete = async (id: string) => {
-        if (!confirm('Are you sure you want to delete this rule?')) return;
+        if (!confirm('هل أنت متأكد من حذف هذه القاعدة؟')) return;
         try {
             const token = localStorage.getItem('token');
             const baseUrl = (import.meta.env.VITE_API_URL || 'http://localhost:3050').replace(/\/$/, '');
@@ -168,7 +167,7 @@ const AutoReply: React.FC<AutoReplyProps> = ({ socket }) => {
             if (!res.ok) {
                 // Revert on failure
                 setRules(rules.map(r => r._id === id ? { ...r, isActive: currentStatus } : r));
-                alert('Failed to toggle rule');
+                alert('فشل تغيير حالة القاعدة');
             }
         } catch (error) {
             console.error('Failed to toggle rule', error);
@@ -178,17 +177,17 @@ const AutoReply: React.FC<AutoReplyProps> = ({ socket }) => {
     };
 
     const getSessionName = (id?: string) => {
-        if (!id) return 'All Devices (Global)';
+        if (!id) return 'كل الأجهزة (عام)';
         const session = sessions.find(s => s.id === id);
-        return session ? `${session.name || 'Device'} (${session.phoneNumber || 'No Number'})` : 'Unknown Device';
+        return session ? `${session.name || 'جهاز'}` : 'جهاز غير معروف';
     };
 
     const getSessionStatusColor = (id?: string) => {
-        if (!id) return 'bg-purple-500/20 text-purple-300 border-purple-500/30';
+        if (!id) return 'bg-purple-50 text-purple-600 border-purple-200';
         const session = sessions.find(s => s.id === id);
         return session?.status === 'CONNECTED'
-            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-            : 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30';
+            ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
+            : 'bg-amber-50 text-amber-600 border-amber-200';
     };
 
     const getReplyTypeIcon = (type?: string) => {
@@ -201,42 +200,52 @@ const AutoReply: React.FC<AutoReplyProps> = ({ socket }) => {
         }
     };
 
+    const replyTypeLabel = (type?: string) => {
+        switch (type) {
+            case 'image': return 'صورة';
+            case 'video': return 'فيديو';
+            case 'document': return 'ملف';
+            case 'audio': return 'صوت';
+            default: return 'نص';
+        }
+    };
+
     return (
-        <div className="space-y-6 animate-fade-in">
+        <div className="space-y-6">
             <div className="flex justify-between items-center">
                 <div>
-                    <h1 className="text-2xl font-bold bg-gradient-to-r from-green-400 to-emerald-500 bg-clip-text text-transparent flex items-center gap-2">
+                    <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
                         <Bot className="w-8 h-8 text-emerald-500" />
-                        Auto Reply Bot
+                        الرد الآلي
                     </h1>
-                    <p className="text-gray-400">Configure automatic responses for incoming messages</p>
+                    <p className="text-slate-500">إعداد ردود تلقائية على الرسائل الواردة حسب الكلمات المفتاحية</p>
                 </div>
                 <button
                     onClick={() => { closeModal(); setShowModal(true); }}
-                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-lg text-white transition-all shadow-lg shadow-emerald-900/20"
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 rounded-xl text-white text-sm font-bold transition-all shadow-lg shadow-emerald-500/20"
                 >
                     <Plus className="w-5 h-5" />
-                    New Rule
+                    قاعدة جديدة
                 </button>
             </div>
 
-            {/* Rules Grid - Compact Design */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {/* Rules Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {rules.map((rule) => (
-                    <div key={rule._id} className="bg-gray-800/80 backdrop-blur border border-gray-700/50 rounded-lg p-3 hover:border-emerald-500/40 transition-all group shadow-sm flex flex-col justify-between h-full relative">
+                    <div key={rule._id} className="bg-white border border-slate-200 rounded-2xl p-4 hover:border-emerald-300 hover:shadow-md transition-all group shadow-sm flex flex-col justify-between relative">
 
                         <div className="flex justify-between items-start mb-2">
-                            <div className="flex flex-col gap-1.5 w-full">
-                                <div className="flex items-center justify-between w-full">
-                                    <h3 className="text-white font-medium truncate flex-1" title={rule.keyword}>
-                                        <span className="text-emerald-500 text-sm font-bold mr-1">#</span>
+                            <div className="flex flex-col gap-2 w-full">
+                                <div className="flex items-center justify-between w-full gap-2">
+                                    <h3 className="text-slate-800 font-bold truncate flex-1" title={rule.keyword}>
+                                        <span className="text-emerald-500 text-sm font-bold ml-1">#</span>
                                         {rule.keyword}
                                     </h3>
-                                    <div className="flex items-center gap-1 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="flex items-center gap-1 shrink-0 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity">
                                         <button
                                             onClick={() => handleToggleRule(rule._id, rule.isActive)}
-                                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-gray-900 transition-colors duration-200 ${rule.isActive ? 'bg-emerald-500' : 'bg-gray-600'} mr-2`}
-                                            title={rule.isActive ? 'Disable Rule' : 'Enable Rule'}
+                                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ${rule.isActive ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                                            title={rule.isActive ? 'إيقاف القاعدة' : 'تفعيل القاعدة'}
                                         >
                                             <span
                                                 className={`pointer-events-none absolute left-0 inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-transform duration-200 ${rule.isActive ? 'translate-x-[calc(100%+2px)]' : 'translate-x-[2px]'}`}
@@ -244,15 +253,15 @@ const AutoReply: React.FC<AutoReplyProps> = ({ socket }) => {
                                         </button>
                                         <button
                                             onClick={() => handleEdit(rule)}
-                                            className="text-gray-400 hover:text-blue-400 p-1 rounded-full hover:bg-blue-500/10 transition-colors"
-                                            title="Edit Rule"
+                                            className="text-slate-400 hover:text-blue-500 p-1 rounded-full hover:bg-blue-50 transition-colors"
+                                            title="تعديل"
                                         >
                                             <Edit2 className="w-3.5 h-3.5" />
                                         </button>
                                         <button
                                             onClick={() => handleDelete(rule._id)}
-                                            className="text-gray-400 hover:text-red-400 p-1 rounded-full hover:bg-red-500/10 transition-colors"
-                                            title="Delete Rule"
+                                            className="text-slate-400 hover:text-red-500 p-1 rounded-full hover:bg-red-50 transition-colors"
+                                            title="حذف"
                                         >
                                             <Trash2 className="w-3.5 h-3.5" />
                                         </button>
@@ -260,25 +269,25 @@ const AutoReply: React.FC<AutoReplyProps> = ({ socket }) => {
                                 </div>
 
                                 <div className="flex flex-wrap gap-1.5">
-                                    <span className="bg-gray-700/50 text-gray-400 text-[10px] px-1.5 py-0.5 rounded border border-gray-600/30">
-                                        {rule.matchType === 'exact' ? 'Exact' : 'Fuzzy'}
+                                    <span className="bg-slate-100 text-slate-500 text-[10px] px-2 py-0.5 rounded-full border border-slate-200">
+                                        {rule.matchType === 'exact' ? 'تطابق تام' : 'مرن'}
                                     </span>
-                                    <div className={`text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 max-w-full truncate ${getSessionStatusColor(rule.sessionId)}`}>
+                                    <div className={`text-[10px] px-2 py-0.5 rounded-full border flex items-center gap-1 max-w-full truncate ${getSessionStatusColor(rule.sessionId)}`}>
                                         <Smartphone className="w-2.5 h-2.5" />
                                         <span className="truncate">{getSessionName(rule.sessionId)}</span>
                                     </div>
-                                    <div className="text-[10px] px-1.5 py-0.5 rounded border border-gray-600/30 bg-gray-800 text-gray-300 flex items-center gap-1">
+                                    <div className="text-[10px] px-2 py-0.5 rounded-full border border-slate-200 bg-slate-50 text-slate-600 flex items-center gap-1">
                                         {getReplyTypeIcon(rule.replyType)}
-                                        <span className="capitalize">{rule.replyType || 'text'}</span>
+                                        <span>{replyTypeLabel(rule.replyType)}</span>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        <div className="mt-2 text-xs text-gray-400 bg-gray-900/40 p-2 rounded border border-gray-700/20">
+                        <div className="mt-2 text-xs text-slate-500 bg-slate-50 p-3 rounded-xl border border-slate-100">
                             {rule.mediaUrl && (
-                                <div className="mb-1 text-[10px] text-blue-400 truncate opacity-70">
-                                    Media: {rule.mediaUrl}
+                                <div className="mb-1 text-[10px] text-blue-500 truncate opacity-80">
+                                    ملف: {rule.mediaUrl}
                                 </div>
                             )}
                             <div className="line-clamp-2" title={rule.response}>{rule.response}</div>
@@ -287,84 +296,89 @@ const AutoReply: React.FC<AutoReplyProps> = ({ socket }) => {
                 ))}
 
                 {rules.length === 0 && !loading && (
-                    <div className="col-span-full py-12 text-center text-gray-500 bg-gray-800/20 rounded-xl border border-dashed border-gray-700">
-                        <Bot className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                        <p>No auto-reply rules configured yet.</p>
+                    <div className="col-span-full py-12 text-center text-slate-400 bg-white rounded-2xl border border-dashed border-slate-300">
+                        <Bot className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                        <p>لا توجد قواعد رد آلي بعد. أضف قاعدتك الأولى.</p>
                     </div>
                 )}
             </div>
 
             {/* Create/Edit Modal */}
             {showModal && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-md p-6 shadow-2xl overflow-y-auto max-h-[90vh]">
-                        <h2 className="text-xl font-bold text-white mb-4">{editId ? 'Edit Rule' : 'Create Auto-Reply Rule'}</h2>
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" dir="rtl">
+                    <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md p-6 shadow-2xl overflow-y-auto max-h-[90vh] custom-scrollbar">
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-xl font-bold text-slate-800">{editId ? 'تعديل القاعدة' : 'إنشاء قاعدة رد آلي'}</h2>
+                            <button onClick={closeModal} className="text-slate-400 hover:text-slate-600">
+                                <X size={22} />
+                            </button>
+                        </div>
                         <form onSubmit={handleSubmit} className="space-y-4">
                             <div>
-                                <label className="block text-sm text-gray-400 mb-1">For Device</label>
+                                <label className="block text-sm font-medium text-slate-500 mb-1.5">الجهاز</label>
                                 <select
                                     value={selectedSessionId}
                                     onChange={(e) => setSelectedSessionId(e.target.value)}
-                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-emerald-500 focus:outline-none"
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-700 focus:border-emerald-500 focus:outline-none"
                                 >
-                                    <option value="">All Devices (Global Rule)</option>
+                                    <option value="">كل الأجهزة (قاعدة عامة)</option>
                                     {sessions.map(s => (
-                                        <option key={s.id} value={s.id}>{s.name} ({s.status})</option>
+                                        <option key={s.id} value={s.id}>{s.name} ({s.status === 'CONNECTED' ? 'متصل' : 'غير متصل'})</option>
                                     ))}
                                 </select>
                             </div>
 
                             <div>
-                                <label className="block text-sm text-gray-400 mb-1">Keyword(s)</label>
+                                <label className="block text-sm font-medium text-slate-500 mb-1.5">الكلمات المفتاحية</label>
                                 <div className="relative">
                                     <input
                                         type="text"
                                         required
                                         value={keyword}
                                         onChange={(e) => setKeyword(e.target.value)}
-                                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-emerald-500 focus:outline-none pl-9"
-                                        placeholder="hi, hello, welcome"
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-700 focus:border-emerald-500 focus:outline-none pr-10"
+                                        placeholder="مرحبا، اهلا، السلام عليكم"
                                     />
-                                    <Terminal className="w-4 h-4 text-gray-500 absolute left-3 top-3" />
+                                    <Terminal className="w-4 h-4 text-slate-400 absolute right-3 top-3.5" />
                                 </div>
-                                <p className="text-xs text-gray-500 mt-1">Separate multiple keywords with commas.</p>
+                                <p className="text-xs text-slate-400 mt-1">افصل بين عدة كلمات بفاصلة (،).</p>
                             </div>
 
                             <div>
-                                <label className="block text-sm text-gray-400 mb-1">Match Type</label>
-                                <div className="flex bg-gray-800 p-1 rounded-lg border border-gray-700">
+                                <label className="block text-sm font-medium text-slate-500 mb-1.5">نوع المطابقة</label>
+                                <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-200">
                                     <button
                                         type="button"
                                         onClick={() => setMatchType('exact')}
-                                        className={`flex-1 py-1.5 text-sm rounded-md transition-colors ${matchType === 'exact' ? 'bg-emerald-600 text-white shadow' : 'text-gray-400 hover:text-white'}`}
+                                        className={`flex-1 py-2 text-sm rounded-lg transition-colors font-bold ${matchType === 'exact' ? 'bg-emerald-500 text-white shadow' : 'text-slate-500 hover:text-slate-700'}`}
                                     >
-                                        Exact match
+                                        تطابق تام
                                     </button>
                                     <button
                                         type="button"
                                         onClick={() => setMatchType('contains')}
-                                        className={`flex-1 py-1.5 text-sm rounded-md transition-colors ${matchType === 'contains' ? 'bg-emerald-600 text-white shadow' : 'text-gray-400 hover:text-white'}`}
+                                        className={`flex-1 py-2 text-sm rounded-lg transition-colors font-bold ${matchType === 'contains' ? 'bg-emerald-500 text-white shadow' : 'text-slate-500 hover:text-slate-700'}`}
                                     >
-                                        Fuzzy / Contains
+                                        مرن / يحتوي
                                     </button>
                                 </div>
-                                <p className="text-xs text-gray-500 mt-1">
-                                    {matchType === 'contains' ? 'Allows typos (e.g. "اهلا" matches "اهلاً").' : 'Strict matching only.'}
+                                <p className="text-xs text-slate-400 mt-1">
+                                    {matchType === 'contains' ? 'يتجاوز الأخطاء الإملائية (مثلاً "اهلا" تطابق "اهلاً").' : 'مطابقة دقيقة فقط.'}
                                 </p>
                             </div>
 
                             <div>
-                                <label className="block text-sm text-gray-400 mb-1">Reply Type</label>
-                                <div className="grid grid-cols-3 gap-2">
-                                    {['text', 'image', 'video', 'document', 'audio'].map((t) => (
+                                <label className="block text-sm font-medium text-slate-500 mb-1.5">نوع الرد</label>
+                                <div className="grid grid-cols-5 gap-2">
+                                    {(['text', 'image', 'video', 'document', 'audio'] as const).map((t) => (
                                         <button
                                             key={t}
                                             type="button"
-                                            onClick={() => setReplyType(t as any)}
-                                            className={`py-2 px-1 text-xs capitalize rounded-lg border transition-all flex flex-col items-center gap-1 ${replyType === t ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
+                                            onClick={() => setReplyType(t)}
+                                            className={`py-2 px-1 text-[11px] rounded-xl border transition-all flex flex-col items-center gap-1 ${replyType === t ? 'bg-emerald-50 border-emerald-500 text-emerald-600' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'}`}
                                         >
                                             {getReplyTypeIcon(t)}
-                                            {t}
+                                            {replyTypeLabel(t)}
                                         </button>
                                     ))}
                                 </div>
@@ -372,47 +386,48 @@ const AutoReply: React.FC<AutoReplyProps> = ({ socket }) => {
 
                             {replyType !== 'text' && (
                                 <div>
-                                    <label className="block text-sm text-gray-400 mb-1">Media Direct Link (URL)</label>
+                                    <label className="block text-sm font-medium text-slate-500 mb-1.5">رابط الملف المباشر (URL)</label>
                                     <input
                                         type="url"
                                         required
                                         value={mediaUrl}
                                         onChange={(e) => setMediaUrl(e.target.value)}
-                                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-emerald-500 focus:outline-none"
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-700 focus:border-emerald-500 focus:outline-none text-left font-mono text-sm"
                                         placeholder={`https://example.com/file.${replyType === 'image' ? 'jpg' : 'mp4'}`}
+                                        dir="ltr"
                                     />
-                                    <p className="text-xs text-yellow-500/80 mt-1">Must be a direct, publicly accessible link.</p>
+                                    <p className="text-xs text-amber-500 mt-1">يجب أن يكون رابطاً مباشراً ومتاحاً للعموم.</p>
                                 </div>
                             )}
 
                             <div>
-                                <label className="block text-sm text-gray-400 mb-1">
-                                    {replyType === 'text' ? 'Response Message' : 'Caption (Optional)'}
+                                <label className="block text-sm font-medium text-slate-500 mb-1.5">
+                                    {replyType === 'text' ? 'نص الرد' : 'تسمية توضيحية (اختياري)'}
                                 </label>
                                 <textarea
                                     required={replyType === 'text'}
                                     value={response}
                                     onChange={(e) => setResponse(e.target.value)}
                                     rows={replyType === 'text' ? 4 : 2}
-                                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-emerald-500 focus:outline-none resize-none"
-                                    placeholder={replyType === 'text' ? "Enter the automated reply..." : "Add a caption for your media..."}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-700 focus:border-emerald-500 focus:outline-none resize-none"
+                                    placeholder={replyType === 'text' ? 'اكتب الرد التلقائي...' : 'أضف وصفاً للملف...'}
                                 />
                             </div>
 
-                            <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-800">
+                            <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-100">
                                 <button
                                     type="button"
                                     onClick={closeModal}
-                                    className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
+                                    className="px-4 py-2.5 text-slate-500 hover:text-slate-700 font-bold transition-colors"
                                 >
-                                    Cancel
+                                    إلغاء
                                 </button>
                                 <button
                                     type="submit"
-                                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors flex items-center gap-2"
+                                    className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl transition-colors flex items-center gap-2 shadow-lg shadow-emerald-500/20"
                                 >
                                     {editId ? <Edit2 className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                                    {editId ? 'Save Changes' : 'Create Rule'}
+                                    {editId ? 'حفظ التغييرات' : 'إنشاء القاعدة'}
                                 </button>
                             </div>
                         </form>
