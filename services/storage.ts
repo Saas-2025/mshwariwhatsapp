@@ -3,12 +3,19 @@ import { User, Session, Contact, Message, MutedChat, Setting, ScheduledCampaign,
 import { AutoReply } from '../models/AutoReply.js';
 
 class MongoStorage {
+    private connectionPromise: Promise<void> | null = null;
+
     constructor() {
+        // Kick off the connection once; init() is idempotent so awaiting it later
+        // (in startServer) reuses the same promise instead of connecting twice.
         this.init();
     }
 
     async init() {
-        await connectDB();
+        if (!this.connectionPromise) {
+            this.connectionPromise = connectDB();
+        }
+        return this.connectionPromise;
     }
 
     getModel(collection: string) {

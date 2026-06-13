@@ -26,18 +26,20 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// --- Global Middleware ---
-app.use(express.json({ limit: '50mb' })); // Combined Body Parser (JSON)
-app.use(express.urlencoded({ extended: true, limit: '50mb' })); // Body Parser (URL Encoded)
-
-app.get('/', (req, res) => res.send('WhatsApp Gateway API is Running 🚀 (V: 1.0.3)')); // Single Root Route
-
-// CORS Middleware (Single Source of Truth)
+// CORS must be the FIRST middleware so every route — including the preflight
+// OPTIONS request the browser sends before login — gets the CORS headers.
+// origin: true reflects the caller's origin (works for the Vercel frontend).
 app.use(cors({
     origin: true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
 }));
+
+// --- Global Middleware ---
+app.use(express.json({ limit: '50mb' })); // Combined Body Parser (JSON)
+app.use(express.urlencoded({ extended: true, limit: '50mb' })); // Body Parser (URL Encoded)
+
+app.get('/', (req, res) => res.send('WhatsApp Gateway API is Running 🚀 (V: 1.0.3)')); // Single Root Route
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -117,14 +119,23 @@ const PORT = Number(process.env.PORT || 3050);
 
 // Initialize & Start Server
 const startServer = async () => {
-    await storage.init(); // Ensure data dir exists
-    await SessionService.loadSessions();
-    SchedulerService.init();
-    await seedAdmin();
-
+    // 1. Start listening FIRST so health-check & CORS preflight always respond,
+    //    even while MongoDB is still connecting. This prevents a crash-loop / 503s
+    //    on Render when the DB is briefly unreachable.
     httpServer.listen(PORT, '0.0.0.0', () => {
         console.log(`Backend Server running on port ${PORT}`);
     });
+
+    // 2. Connect to MongoDB (retries internally), then load everything that needs the DB.
+    try {
+        await storage.init();
+        await SessionService.loadSessions();
+        SchedulerService.init();
+        await seedAdmin();
+        console.log('✅ Startup complete (DB connected, sessions loaded).');
+    } catch (err) {
+        console.error('⚠️  Background startup error (server still listening):', err);
+    }
 };
 
 startServer();
