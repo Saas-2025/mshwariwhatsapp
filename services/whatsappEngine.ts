@@ -27,6 +27,9 @@ const msgRetryCounterCache = new NodeCache();
 // Cache to store sent messages for handling client-side decryption retries (Fix: "Waiting for this message")
 const sentMessagesCache = new NodeCache({ stdTTL: 3600, checkperiod: 600 }); // Store for 1 hour
 
+// Human takeover: minutes the bot stays silent after the owner replies manually, then auto-resumes.
+const HUMAN_TAKEOVER_MINUTES = Number(process.env.HUMAN_TAKEOVER_MINUTES) || 60;
+
 export class WhatsAppEngine {
   private userId: string;
   private sessionId: string;
@@ -328,13 +331,13 @@ export class WhatsAppEngine {
                 // Only proceed if there's actual content (already checked isUnmuteCommand above)
                 if (!textContent && !hasMedia) continue;
 
-                console.log(`[Human Takeover] MANUAL REPLY detected. Chat: ${remoteJid}, Content: "${textContent.substring(0, 50)}", Type: ${type}`);
+                const muteUntil = new Date(Date.now() + HUMAN_TAKEOVER_MINUTES * 60 * 1000);
+                console.log(`[Human Takeover] MANUAL REPLY detected. Pausing bot for ${remoteJid} for ${HUMAN_TAKEOVER_MINUTES} min (until ${muteUntil.toISOString()}).`);
                 try {
                   await storage.saveItem('muted_chats', {
                     sessionId: this.sessionId,
                     chatId: remoteJid,
-                    mutedAt: new Date(),
-                    userId: this.userId
+                    mutedUntil: muteUntil
                   });
                 } catch (err) {
                   console.error('[Human Takeover] Failed to mute chat:', err);
@@ -434,8 +437,20 @@ export class WhatsAppEngine {
               const sessionState = await storage.getItem('sessions', { id: this.sessionId });
               const replyDisabled = !!(sessionState && sessionState.autoReplyEnabled === false);
 
-              // Human takeover: if the owner replied manually, this chat is muted
-              const isMuted = await storage.getItem('muted_chats', { sessionId: this.sessionId, chatId: remoteJid });
+              // Human takeover: muted only while within the takeover window; auto-resume after it elapses.
+              let isMuted = false;
+              const muteRec = await storage.getItem('muted_chats', { sessionId: this.sessionId, chatId: remoteJid });
+              if (muteRec) {
+                const until = muteRec.mutedUntil
+                  ? new Date(muteRec.mutedUntil).getTime()
+                  : new Date(muteRec.createdAt || 0).getTime() + HUMAN_TAKEOVER_MINUTES * 60 * 1000;
+                if (Date.now() < until) {
+                  isMuted = true;
+                } else {
+                  await storage.deleteItem('muted_chats', { sessionId: this.sessionId, chatId: remoteJid });
+                  console.log(`[Human Takeover] Auto-resumed ${remoteJid} (takeover window elapsed).`);
+                }
+              }
 
               if (textContent) {
                 // Resolve the per-session AI agent and build memory BEFORE logging the
@@ -448,9 +463,9 @@ export class WhatsAppEngine {
                 await this.logChat(remoteJid, 'user', textContent, pushName);
 
                 if (replyDisabled) {
-                  console.log(`[AutoReply] Reply disabled for session ${this.sessionId} — logged only.`);
+                  console.log(`[Reply] SKIP ${remoteJid}: auto-reply is OFF for this session (master switch "التشغيل العام").`);
                 } else if (isMuted) {
-                  console.log(`[AutoReply] [Muted] ${remoteJid} (human takeover) — logged only.`);
+                  console.log(`[Reply] SKIP ${remoteJid}: human takeover active — bot paused, auto-resumes within ${HUMAN_TAKEOVER_MINUTES} min (or send #bot).`);
                 } else if (aiActive) {
                   // 1) AI Agent is the PRIMARY responder (knowledge base + conversation memory)
                   try {
@@ -468,6 +483,8 @@ export class WhatsAppEngine {
                       }
                       await this.logChat(remoteJid, 'assistant', aiReply, undefined, 'ai');
                       console.log(`[AI] Sent AI response to ${remoteJid}`);
+                    } else {
+                      console.warn(`[Reply] NO REPLY ${remoteJid}: AI returned nothing — check GROQ_API_KEY / Groq rate limits.`);
                     }
                   } catch (aiErr) {
                     console.error('[AI] Error generating AI reply:', aiErr);
@@ -523,6 +540,8 @@ export class WhatsAppEngine {
                       console.error('[AutoReply] Failed to send response:', sendErr);
                       await this.sock.sendMessage(remoteJid, { text: `[Error sending media] ${responseText}` }, { quoted: msg });
                     }
+                  } else {
+                    console.log(`[Reply] NO REPLY ${remoteJid}: no active AI agent for this session and no keyword rule matched.`);
                   }
                 }
               }
