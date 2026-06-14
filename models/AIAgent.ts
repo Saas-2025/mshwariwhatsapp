@@ -13,6 +13,15 @@ export interface IKnowledgeDocument {
   chars?: number;
 }
 
+export interface IGroqKey {
+  id: string;
+  key: string;
+  label?: string;
+  status?: 'untested' | 'ok' | 'exhausted' | 'invalid' | 'error';
+  lastError?: string;
+  lastUsedAt?: Date;
+}
+
 export interface IAIAgent extends Document {
   userId: string;
   sessionId?: string | null; // null = legacy/global agent; otherwise per-session
@@ -27,6 +36,8 @@ export interface IAIAgent extends Document {
   fallbackToAI: boolean;
   knowledgeBase: IKnowledgeEntry[];
   documents: IKnowledgeDocument[];
+  groqKeys: IGroqKey[];
+  activeGroqKeyId?: string;
   updatedAt?: Date;
 }
 
@@ -43,6 +54,15 @@ const KnowledgeDocumentSchema = new Schema({
   chars: { type: Number, default: 0 }
 }, { _id: false });
 
+const GroqKeySchema = new Schema({
+  id: { type: String, required: true },
+  key: { type: String, required: true },
+  label: { type: String, default: '' },
+  status: { type: String, default: 'untested' }, // untested | ok | exhausted | invalid | error
+  lastError: { type: String, default: '' },
+  lastUsedAt: { type: Date }
+}, { _id: false });
+
 const AIAgentSchema = new Schema<IAIAgent>({
   userId: { type: String, required: true },
   sessionId: { type: String, default: null },
@@ -56,7 +76,9 @@ const AIAgentSchema = new Schema<IAIAgent>({
   isActive: { type: Boolean, default: false },
   fallbackToAI: { type: Boolean, default: false },
   knowledgeBase: { type: [KnowledgeEntrySchema], default: [] },
-  documents: { type: [KnowledgeDocumentSchema], default: [] }
+  documents: { type: [KnowledgeDocumentSchema], default: [] },
+  groqKeys: { type: [GroqKeySchema], default: [] },
+  activeGroqKeyId: { type: String, default: '' }
 }, { timestamps: true });
 
 // One agent per (user, session). sessionId=null is the legacy/global agent.

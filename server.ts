@@ -790,6 +790,21 @@ const resolveAgentOwner = (req: any, sessionId: string | null): string | null =>
     return null;
 };
 
+// Replace raw Groq keys with a masked view before sending an agent to the client.
+const maskAgent = (agent: any) => {
+    if (agent && Array.isArray(agent.groqKeys)) {
+        agent.groqKeys = agent.groqKeys.map((k: any) => ({
+            id: k.id,
+            label: k.label || '',
+            status: k.status || 'untested',
+            lastError: k.lastError || '',
+            hint: k.key ? '••••' + String(k.key).slice(-4) : '',
+            isActive: !!agent.activeGroqKeyId && k.id === agent.activeGroqKeyId
+        }));
+    }
+    return agent;
+};
+
 // Extract plain text from an uploaded knowledge file (txt/md/json/csv/pdf/docx)
 const extractDocumentText = async (name: string, mimeType: string, buffer: Buffer): Promise<string> => {
     const ext = (name.split('.').pop() || '').toLowerCase();
@@ -824,7 +839,7 @@ app.get('/api/aiagent', authenticateToken, async (req: any, res) => {
         if (!agent) {
             return res.json(null);
         }
-        res.json(agent);
+        res.json(maskAgent(agent));
     } catch (e) {
         console.error('[AI Agent] Fetch error:', e);
         res.status(500).json({ error: 'Failed to fetch AI agent config' });
@@ -860,7 +875,7 @@ app.post('/api/aiagent', authenticateToken, async (req: any, res) => {
         }
 
         const saved = await storage.saveItem('aiagent', agentData);
-        res.json(saved);
+        res.json(maskAgent(saved));
     } catch (e: any) {
         console.error('[AI Agent] Save error:', e);
         res.status(500).json({ error: e.message || 'Failed to save AI agent config' });
@@ -881,7 +896,7 @@ app.put('/api/aiagent/toggle', authenticateToken, async (req: any, res) => {
         if (fallbackToAI !== undefined) existing.fallbackToAI = fallbackToAI;
 
         const saved = await storage.saveItem('aiagent', existing);
-        res.json(saved);
+        res.json(maskAgent(saved));
     } catch (e: any) {
         console.error('[AI Agent] Toggle error:', e);
         res.status(500).json({ error: e.message });
@@ -906,7 +921,7 @@ app.post('/api/aiagent/knowledge', authenticateToken, async (req: any, res) => {
 
         existing.knowledgeBase = [...(existing.knowledgeBase || []), entry];
         const saved = await storage.saveItem('aiagent', existing);
-        res.json(saved);
+        res.json(maskAgent(saved));
     } catch (e: any) {
         console.error('[AI Agent] Knowledge add error:', e);
         res.status(500).json({ error: e.message });
@@ -924,7 +939,7 @@ app.delete('/api/aiagent/knowledge/:entryId', authenticateToken, async (req: any
         existing.knowledgeBase = (existing.knowledgeBase || []).filter((k: any) => k.id !== req.params.entryId);
         existing._id = existing._id;
         const saved = await storage.saveItem('aiagent', existing);
-        res.json(saved);
+        res.json(maskAgent(saved));
     } catch (e: any) {
         console.error('[AI Agent] Knowledge delete error:', e);
         res.status(500).json({ error: e.message });
@@ -966,7 +981,7 @@ app.post('/api/aiagent/document', authenticateToken, async (req: any, res) => {
             || { userId: ownerId, sessionId: sid, documents: [] };
         existing.documents = [...(existing.documents || []), entry];
         const saved = await storage.saveItem('aiagent', existing);
-        res.json({ agent: saved, truncated });
+        res.json({ agent: maskAgent(saved), truncated });
     } catch (e: any) {
         console.error('[AI Agent] Document add error:', e);
         res.status(500).json({ error: e.message });
@@ -982,9 +997,49 @@ app.delete('/api/aiagent/document/:docId', authenticateToken, async (req: any, r
         if (!existing) return res.status(404).json({ error: 'Not found' });
         existing.documents = (existing.documents || []).filter((d: any) => d.id !== req.params.docId);
         const saved = await storage.saveItem('aiagent', existing);
-        res.json(saved);
+        res.json(maskAgent(saved));
     } catch (e: any) {
         console.error('[AI Agent] Document delete error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Add a Groq API key to a session's pool (used with automatic failover)
+app.post('/api/aiagent/groqkey', authenticateToken, async (req: any, res) => {
+    try {
+        const { sessionId, key, label } = req.body;
+        if (!key || !String(key).trim()) return res.status(400).json({ error: 'Missing key' });
+        const sid = sessionId || null;
+        const ownerId = resolveAgentOwner(req, sid);
+        if (ownerId === null) return res.status(403).json({ error: 'Access denied' });
+
+        const { v4: uuidv4 } = await import('uuid');
+        const entry = { id: uuidv4(), key: String(key).trim(), label: (label || '').trim(), status: 'untested', lastError: '', lastUsedAt: null };
+
+        const existing = await storage.getItem('aiagent', { userId: ownerId, sessionId: sid })
+            || { userId: ownerId, sessionId: sid, groqKeys: [] };
+        existing.groqKeys = [...(existing.groqKeys || []), entry];
+        await storage.saveItem('aiagent', existing);
+        res.json({ success: true });
+    } catch (e: any) {
+        console.error('[AI Agent] Groq key add error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.delete('/api/aiagent/groqkey/:keyId', authenticateToken, async (req: any, res) => {
+    try {
+        const sessionId = req.query.sessionId || null;
+        const ownerId = resolveAgentOwner(req, sessionId);
+        if (ownerId === null) return res.status(403).json({ error: 'Access denied' });
+        const existing = await storage.getItem('aiagent', { userId: ownerId, sessionId });
+        if (!existing) return res.status(404).json({ error: 'Not found' });
+        existing.groqKeys = (existing.groqKeys || []).filter((k: any) => k.id !== req.params.keyId);
+        if (existing.activeGroqKeyId === req.params.keyId) existing.activeGroqKeyId = '';
+        await storage.saveItem('aiagent', existing);
+        res.json({ success: true });
+    } catch (e: any) {
+        console.error('[AI Agent] Groq key delete error:', e);
         res.status(500).json({ error: e.message });
     }
 });

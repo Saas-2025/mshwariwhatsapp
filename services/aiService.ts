@@ -1,4 +1,5 @@
 import { IAIAgent } from '../models/AIAgent.js';
+import { AIAgent } from '../models/index.js';
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
@@ -53,14 +54,18 @@ export async function getAIResponse(
   userMessage: string,
   history: { role: 'user' | 'assistant'; text: string }[] = []
 ): Promise<string | null> {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) {
-    console.error('[AI] GROQ_API_KEY is not set in environment');
+  if (!agent.isActive) {
+    console.log('[AI] Agent is not active, skipping AI response');
     return null;
   }
 
-  if (!agent.isActive) {
-    console.log('[AI] Agent is not active, skipping AI response');
+  // Build the candidate Groq key pool: per-session keys (with failover) or the env key.
+  const dbKeys = (agent.groqKeys || []).filter((k: any) => k && k.key).map((k: any) => ({ id: k.id, key: k.key }));
+  const candidates = dbKeys.length > 0
+    ? dbKeys
+    : (process.env.GROQ_API_KEY ? [{ id: 'env', key: process.env.GROQ_API_KEY }] : []);
+  if (candidates.length === 0) {
+    console.error('[AI] No Groq API key configured (no per-session keys and no GROQ_API_KEY).');
     return null;
   }
 
@@ -112,40 +117,73 @@ export async function getAIResponse(
       max_tokens: 1024
     });
 
-    // Retry transient errors (rate limit / 5xx) so a momentary 429 doesn't drop the reply
-    let response: Response | undefined;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      response = await fetch(GROQ_API_URL, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: requestBody
-      });
-      if (response.ok) break;
-      if (![429, 500, 502, 503].includes(response.status)) break;
-      const wait = (attempt + 1) * 1200;
-      console.warn(`[AI] Groq returned ${response.status}; retrying in ${wait}ms (attempt ${attempt + 1}/3)`);
-      await new Promise(r => setTimeout(r, wait));
+    // Try each key in order; on rate-limit/quota (429) move to the NEXT key automatically.
+    const statusUpdates: Record<string, { status: string; lastError: string }> = {};
+    let reply: string | null = null;
+    let usedKeyId = '';
+
+    for (const cand of candidates) {
+      let resp: Response | undefined;
+      // Retry only pure 5xx on the same key; 429/auth errors move on immediately.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        resp = await fetch(GROQ_API_URL, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${cand.key}`, 'Content-Type': 'application/json' },
+          body: requestBody
+        });
+        if (resp.ok || ![500, 502, 503].includes(resp.status)) break;
+        await new Promise(r => setTimeout(r, 800));
+      }
+
+      if (resp && resp.ok) {
+        const data: any = await resp.json();
+        const content = data?.choices?.[0]?.message?.content;
+        if (content) {
+          reply = content.trim();
+          usedKeyId = cand.id;
+          statusUpdates[cand.id] = { status: 'ok', lastError: '' };
+          break;
+        }
+        statusUpdates[cand.id] = { status: 'error', lastError: 'empty response' };
+        continue;
+      }
+
+      const code = resp?.status;
+      const errText = resp ? await resp.text().catch(() => '') : 'no response';
+      if (code === 429) {
+        statusUpdates[cand.id] = { status: 'exhausted', lastError: 'تجاوز الحد (429)' };
+        console.warn(`[AI] Groq key "${cand.id}" hit its limit (429) — switching to the next key...`);
+      } else if (code === 401 || code === 403) {
+        statusUpdates[cand.id] = { status: 'invalid', lastError: `مفتاح غير صالح (${code})` };
+        console.warn(`[AI] Groq key "${cand.id}" invalid (${code}) — switching to the next key...`);
+      } else {
+        statusUpdates[cand.id] = { status: 'error', lastError: `HTTP ${code}: ${errText.slice(0, 120)}` };
+        console.warn(`[AI] Groq key "${cand.id}" error (${code}) — switching to the next key...`);
+      }
     }
 
-    if (!response || !response.ok) {
-      const errorText = response ? await response.text() : 'no response';
-      console.error(`[AI] Groq API error (${response?.status}): ${errorText}`);
-      return null;
+    // Persist per-key status + which key is currently working (for the dashboard)
+    if (dbKeys.length > 0 && (agent as any)._id && Object.keys(statusUpdates).length > 0) {
+      try {
+        const updated = (agent.groqKeys || []).map((k: any) => statusUpdates[k.id]
+          ? { ...k, status: statusUpdates[k.id].status, lastError: statusUpdates[k.id].lastError, lastUsedAt: new Date() }
+          : k);
+        await AIAgent.updateOne(
+          { _id: (agent as any)._id },
+          { $set: { groqKeys: updated, activeGroqKeyId: usedKeyId || (agent as any).activeGroqKeyId || '' } }
+        );
+      } catch (e) {
+        console.error('[AI] Failed to persist Groq key status:', e);
+      }
     }
-
-    const data: any = await response.json();
-    let reply = data?.choices?.[0]?.message?.content;
 
     if (!reply) {
-      console.error('[AI] No response content from Groq API');
+      console.error('[AI] All Groq keys failed (exhausted/invalid). No reply produced.');
       return null;
     }
 
-    reply = reply.trim();
-    // Strip a leading "الإجابة:" / "الجواب:" / "ج:" the model may echo from the
-    // knowledge-base "س:/ج:" format, so the customer only sees the answer text.
+    // Strip a leading "الإجابة:" / "ج:" the model may echo from the knowledge format.
     reply = reply.replace(/^\s*(?:الإجابة|الاجابة|الجواب|إجابة|اجابة|ج)\s*[:：.\-–]\s*/u, '').trim();
-
     return reply;
   } catch (error) {
     console.error('[AI] Error calling Groq API:', error);

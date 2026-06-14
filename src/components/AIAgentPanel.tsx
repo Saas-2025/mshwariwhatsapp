@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BookOpen, Plus, Trash2, Save, AlertCircle, CheckCircle, Settings2, Power, FileText, Upload } from 'lucide-react';
+import { BookOpen, Plus, Trash2, Save, AlertCircle, CheckCircle, Settings2, Power, FileText, Upload, KeyRound } from 'lucide-react';
 
 export interface KnowledgeEntry { id: string; question: string; answer: string; }
 export interface KnowledgeDoc { id: string; name: string; content?: string; chars?: number; }
+export interface GroqKeyView { id: string; label?: string; status?: string; lastError?: string; hint?: string; isActive?: boolean; }
 export interface AIAgentConfig {
   _id?: string;
   name: string;
@@ -16,6 +17,7 @@ export interface AIAgentConfig {
   fallbackToAI: boolean;
   knowledgeBase: KnowledgeEntry[];
   documents: KnowledgeDoc[];
+  groqKeys?: GroqKeyView[];
 }
 
 const DEFAULT_CONFIG: AIAgentConfig = {
@@ -29,7 +31,8 @@ const DEFAULT_CONFIG: AIAgentConfig = {
   isActive: false,
   fallbackToAI: true,
   knowledgeBase: [],
-  documents: []
+  documents: [],
+  groqKeys: []
 };
 
 const MODELS = [
@@ -52,6 +55,9 @@ const AIAgentPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
   const [newAnswer, setNewAnswer] = useState('');
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [newKey, setNewKey] = useState('');
+  const [newKeyLabel, setNewKeyLabel] = useState('');
+  const [keyBusy, setKeyBusy] = useState(false);
 
   const flash = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
@@ -186,6 +192,46 @@ const AIAgentPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
     } catch { /* ignore */ }
   };
 
+  const reloadKeys = async () => {
+    try {
+      const res = await fetch(`${baseUrl()}/api/aiagent?sessionId=${sessionId}`, { headers: authHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        setConfig(prev => ({ ...prev, _id: data?._id || prev._id, groqKeys: data?.groqKeys || [] }));
+      }
+    } catch { /* ignore */ }
+  };
+
+  const addGroqKey = async () => {
+    if (!newKey.trim()) return;
+    setKeyBusy(true);
+    try {
+      const res = await fetch(`${baseUrl()}/api/aiagent/groqkey`, {
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ sessionId, key: newKey.trim(), label: newKeyLabel.trim() })
+      });
+      if (res.ok) { setNewKey(''); setNewKeyLabel(''); await reloadKeys(); }
+      else flash('error', `❌ ${(await res.json().catch(() => ({}))).error || 'فشل إضافة المفتاح'}`);
+    } catch (e: any) { flash('error', `❌ ${e.message}`); } finally { setKeyBusy(false); }
+  };
+
+  const deleteGroqKey = async (id: string) => {
+    try {
+      const res = await fetch(`${baseUrl()}/api/aiagent/groqkey/${id}?sessionId=${sessionId}`, { method: 'DELETE', headers: authHeaders() });
+      if (res.ok) await reloadKeys();
+    } catch { /* ignore */ }
+  };
+
+  const keyStatusBadge = (status?: string) => {
+    switch (status) {
+      case 'ok': return { label: 'شغّال', cls: 'bg-emerald-100 text-emerald-600' };
+      case 'exhausted': return { label: 'تجاوز الحد', cls: 'bg-amber-100 text-amber-700' };
+      case 'invalid': return { label: 'غير صالح', cls: 'bg-red-100 text-red-600' };
+      case 'error': return { label: 'خطأ', cls: 'bg-red-100 text-red-600' };
+      default: return { label: 'لم يُختبر', cls: 'bg-slate-100 text-slate-500' };
+    }
+  };
+
   if (loading) {
     return <div className="flex items-center justify-center h-40"><div className="animate-spin rounded-full h-7 w-7 border-b-2 border-emerald-500" /></div>;
   }
@@ -278,6 +324,53 @@ const AIAgentPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
             <input type="range" min="0" max="2" step="0.1" value={config.temperature}
               onChange={e => setConfig(p => ({ ...p, temperature: parseFloat(e.target.value) }))} className="w-full accent-emerald-500" />
             <div className="flex justify-between text-xs text-slate-400 mt-1"><span>دقيق</span><span>إبداعي</span></div>
+          </div>
+
+          {/* Groq API keys pool (automatic failover) */}
+          <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/60">
+            <div className="flex items-center gap-2 mb-1">
+              <KeyRound size={16} className="text-emerald-500" />
+              <h4 className="text-sm font-bold text-slate-700">مفاتيح Groq API (تبديل تلقائي)</h4>
+            </div>
+            <p className="text-xs text-slate-400 mb-3">أضف أكثر من مفتاح. لو واحد وصل الحد، النظام ينتقل تلقائياً للي بعده لحد ما يرد على العميل. المفتاح اللي «يعمل الآن» بيظهر بعلامة خضرا.</p>
+
+            <div className="flex flex-col sm:flex-row gap-2 mb-3">
+              <input value={newKeyLabel} onChange={e => setNewKeyLabel(e.target.value)} placeholder="اسم (اختياري)"
+                className="sm:w-32 bg-white border border-slate-200 p-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500" />
+              <input value={newKey} onChange={e => setNewKey(e.target.value)} placeholder="gsk_..." dir="ltr" type="password"
+                className="flex-1 bg-white border border-slate-200 p-2.5 rounded-xl text-sm font-mono focus:outline-none focus:border-emerald-500"
+                onKeyDown={e => e.key === 'Enter' && addGroqKey()} />
+              <button type="button" onClick={addGroqKey} disabled={!newKey.trim() || keyBusy}
+                className="bg-emerald-500 hover:bg-emerald-600 text-white p-2.5 px-4 rounded-xl text-sm font-bold flex items-center justify-center gap-1 disabled:opacity-50">
+                <Plus size={16} /> إضافة
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {(!config.groqKeys || config.groqKeys.length === 0) && (
+                <p className="text-xs text-slate-400 text-center py-3 bg-white rounded-lg border border-dashed border-slate-200">
+                  لا توجد مفاتيح — سيُستخدم مفتاح النظام الافتراضي إن وُجد.
+                </p>
+              )}
+              {(config.groqKeys || []).map((k, idx) => {
+                const b = keyStatusBadge(k.status);
+                return (
+                  <div key={k.id} className={`flex items-center gap-2 p-2.5 rounded-lg border bg-white ${k.isActive ? 'border-emerald-300 ring-1 ring-emerald-200' : 'border-slate-200'}`}>
+                    <span className="text-xs font-bold text-slate-400 w-5 text-center">{idx + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-bold text-slate-700 truncate">{k.label || 'مفتاح'}</span>
+                        <code className="text-[10px] font-mono text-slate-400" dir="ltr">{k.hint}</code>
+                        {k.isActive && <span className="text-[10px] bg-emerald-500 text-white px-1.5 py-0.5 rounded-full">يعمل الآن</span>}
+                      </div>
+                      {k.lastError && <p className="text-[10px] text-red-400 truncate">{k.lastError}</p>}
+                    </div>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${b.cls}`}>{b.label}</span>
+                    <button type="button" onClick={() => deleteGroqKey(k.id)} className="text-slate-400 hover:text-red-500 p-1.5 rounded-full hover:bg-red-50"><Trash2 size={14} /></button>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
