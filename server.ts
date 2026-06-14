@@ -789,6 +789,31 @@ const resolveAgentOwner = (req: any, sessionId: string | null): string | null =>
     return null;
 };
 
+// Extract plain text from an uploaded knowledge file (txt/md/json/csv/pdf/docx)
+const extractDocumentText = async (name: string, mimeType: string, buffer: Buffer): Promise<string> => {
+    const ext = (name.split('.').pop() || '').toLowerCase();
+    const mt = (mimeType || '').toLowerCase();
+
+    if (ext === 'pdf' || mt.includes('pdf')) {
+        const { PDFParse } = await import('pdf-parse');
+        const parser = new PDFParse({ data: new Uint8Array(buffer) });
+        const result = await parser.getText();
+        return result.text || '';
+    }
+    if (ext === 'docx' || mt.includes('officedocument.wordprocessingml')) {
+        const mammothMod: any = await import('mammoth');
+        const mammoth = mammothMod.default || mammothMod;
+        const result = await mammoth.extractRawText({ buffer });
+        return result.value || '';
+    }
+    if (ext === 'json' || mt.includes('json')) {
+        try { return JSON.stringify(JSON.parse(buffer.toString('utf8')), null, 2); }
+        catch { return buffer.toString('utf8'); }
+    }
+    // txt, md, csv, and any other text-like file
+    return buffer.toString('utf8');
+};
+
 app.get('/api/aiagent', authenticateToken, async (req: any, res) => {
     try {
         const sessionId = req.query.sessionId || null;
@@ -901,6 +926,64 @@ app.delete('/api/aiagent/knowledge/:entryId', authenticateToken, async (req: any
         res.json(saved);
     } catch (e: any) {
         console.error('[AI Agent] Knowledge delete error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Upload a knowledge file (txt/pdf/docx/json/md) — server extracts the text
+app.post('/api/aiagent/document', authenticateToken, async (req: any, res) => {
+    try {
+        const { sessionId, name, mimeType, dataBase64 } = req.body;
+        const sid = sessionId || null;
+        const ownerId = resolveAgentOwner(req, sid);
+        if (ownerId === null) return res.status(403).json({ error: 'Access denied' });
+        if (!name || !dataBase64) return res.status(400).json({ error: 'Missing file data' });
+
+        const raw = String(dataBase64);
+        const base64 = raw.includes(',') ? raw.split(',')[1] : raw;
+        const buffer = Buffer.from(base64, 'base64');
+
+        let text = '';
+        try {
+            text = await extractDocumentText(name, mimeType || '', buffer);
+        } catch (parseErr: any) {
+            console.error('[Doc] parse error:', parseErr?.message);
+            return res.status(400).json({ error: 'تعذّر قراءة الملف. تأكد أنه صالح وغير محمي بكلمة مرور.' });
+        }
+
+        text = (text || '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+        if (!text) return res.status(400).json({ error: 'الملف لا يحتوي على نص قابل للقراءة (قد يكون صورة ممسوحة).' });
+
+        const MAX = 25000;
+        const truncated = text.length > MAX;
+        if (truncated) text = text.slice(0, MAX);
+
+        const { v4: uuidv4 } = await import('uuid');
+        const entry = { id: uuidv4(), name: String(name).slice(0, 200), content: text, chars: text.length };
+
+        const existing = await storage.getItem('aiagent', { userId: ownerId, sessionId: sid })
+            || { userId: ownerId, sessionId: sid, documents: [] };
+        existing.documents = [...(existing.documents || []), entry];
+        const saved = await storage.saveItem('aiagent', existing);
+        res.json({ agent: saved, truncated });
+    } catch (e: any) {
+        console.error('[AI Agent] Document add error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.delete('/api/aiagent/document/:docId', authenticateToken, async (req: any, res) => {
+    try {
+        const sessionId = req.query.sessionId || null;
+        const ownerId = resolveAgentOwner(req, sessionId);
+        if (ownerId === null) return res.status(403).json({ error: 'Access denied' });
+        const existing = await storage.getItem('aiagent', { userId: ownerId, sessionId });
+        if (!existing) return res.status(404).json({ error: 'Not found' });
+        existing.documents = (existing.documents || []).filter((d: any) => d.id !== req.params.docId);
+        const saved = await storage.saveItem('aiagent', existing);
+        res.json(saved);
+    } catch (e: any) {
+        console.error('[AI Agent] Document delete error:', e);
         res.status(500).json({ error: e.message });
     }
 });

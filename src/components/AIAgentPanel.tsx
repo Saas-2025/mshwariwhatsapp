@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { BookOpen, Plus, Trash2, Save, AlertCircle, CheckCircle, Settings2, Power } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { BookOpen, Plus, Trash2, Save, AlertCircle, CheckCircle, Settings2, Power, FileText, Upload } from 'lucide-react';
 
 export interface KnowledgeEntry { id: string; question: string; answer: string; }
+export interface KnowledgeDoc { id: string; name: string; content?: string; chars?: number; }
 export interface AIAgentConfig {
   _id?: string;
   name: string;
@@ -14,6 +15,7 @@ export interface AIAgentConfig {
   isActive: boolean;
   fallbackToAI: boolean;
   knowledgeBase: KnowledgeEntry[];
+  documents: KnowledgeDoc[];
 }
 
 const DEFAULT_CONFIG: AIAgentConfig = {
@@ -26,7 +28,8 @@ const DEFAULT_CONFIG: AIAgentConfig = {
   aiModel: 'llama-3.3-70b-versatile',
   isActive: false,
   fallbackToAI: true,
-  knowledgeBase: []
+  knowledgeBase: [],
+  documents: []
 };
 
 const MODELS = [
@@ -47,6 +50,8 @@ const AIAgentPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [newQuestion, setNewQuestion] = useState('');
   const [newAnswer, setNewAnswer] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const flash = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
@@ -134,6 +139,49 @@ const AIAgentPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
       if (res.ok) {
         const saved = await res.json();
         setConfig(prev => ({ ...prev, knowledgeBase: saved.knowledgeBase || [] }));
+      }
+    } catch { /* ignore */ }
+  };
+
+  const uploadDocument = async (file: File) => {
+    if (!file) return;
+    if (file.size > 12 * 1024 * 1024) { flash('error', '❌ حجم الملف أكبر من 12MB'); return; }
+    setUploading(true);
+    try {
+      const dataBase64 = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result as string);
+        r.onerror = () => reject(new Error('read error'));
+        r.readAsDataURL(file);
+      });
+      const res = await fetch(`${baseUrl()}/api/aiagent/document`, {
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ sessionId, name: file.name, mimeType: file.type, dataBase64 })
+      });
+      if (res.ok) {
+        const { agent, truncated } = await res.json();
+        setConfig(prev => ({ ...prev, _id: agent._id, documents: agent.documents || [] }));
+        flash('success', truncated ? '✅ تم رفع الملف (اكتفينا بأول جزء كبير منه)' : '✅ تم رفع الملف وقراءته بنجاح');
+      } else {
+        const err = await res.json().catch(() => ({}));
+        flash('error', `❌ ${err.error || 'فشل رفع الملف'}`);
+      }
+    } catch (e: any) {
+      flash('error', `❌ خطأ في الشبكة: ${e.message}`);
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  const deleteDocument = async (docId: string) => {
+    try {
+      const res = await fetch(`${baseUrl()}/api/aiagent/document/${docId}?sessionId=${sessionId}`, {
+        method: 'DELETE', headers: authHeaders()
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setConfig(prev => ({ ...prev, documents: saved.documents || [] }));
       }
     } catch { /* ignore */ }
   };
@@ -238,6 +286,47 @@ const AIAgentPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
       {activeTab === 'knowledge' && (
         <div className="space-y-3">
           <p className="text-sm text-slate-500">أسئلة وأجوبة خاصة بهذا الجهاز ليرد البوت بدقة.</p>
+
+          {/* File feeding */}
+          <div className="border-2 border-dashed border-emerald-200 bg-emerald-50/40 rounded-xl p-4">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2 text-slate-600">
+                <FileText size={20} className="text-emerald-500 shrink-0" />
+                <div>
+                  <p className="text-sm font-bold">تغذية بملفات</p>
+                  <p className="text-xs text-slate-400">PDF · Word · TXT · MD · JSON — يقرأ البوت تفاصيلها ويرد منها</p>
+                </div>
+              </div>
+              <input ref={fileRef} type="file" accept=".txt,.md,.json,.csv,.pdf,.docx" className="hidden"
+                onChange={e => e.target.files && e.target.files[0] && uploadDocument(e.target.files[0])} />
+              <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
+                className="bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 disabled:opacity-50 shrink-0">
+                {uploading
+                  ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> جاري الرفع...</>
+                  : <><Upload size={16} /> رفع ملف</>}
+              </button>
+            </div>
+
+            {config.documents && config.documents.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {config.documents.map(d => (
+                  <div key={d.id} className="flex items-center gap-3 bg-white p-2.5 rounded-lg border border-slate-200">
+                    <FileText size={16} className="text-emerald-500 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-slate-700 truncate">{d.name}</p>
+                      <p className="text-[10px] text-slate-400">{(d.chars || d.content?.length || 0).toLocaleString()} حرف</p>
+                    </div>
+                    <button type="button" onClick={() => deleteDocument(d.id)} className="text-slate-400 hover:text-red-500 p-1.5 rounded-full hover:bg-red-50"><Trash2 size={15} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 text-xs text-slate-400">
+            <span className="flex-1 h-px bg-slate-100" /> أو أضف سؤال وجواب يدوياً <span className="flex-1 h-px bg-slate-100" />
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <input type="text" value={newQuestion} onChange={e => setNewQuestion(e.target.value)} onKeyDown={e => e.key === 'Enter' && addKnowledge()}
               className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl focus:outline-none focus:border-emerald-500" placeholder="السؤال: ما هي ساعات العمل؟" />

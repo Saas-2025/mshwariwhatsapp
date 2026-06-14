@@ -6,6 +6,13 @@ export interface IKnowledgeEntry {
   answer: string;
 }
 
+export interface IKnowledgeDocument {
+  id: string;
+  name: string;
+  content: string;
+  chars?: number;
+}
+
 export interface IAIAgent extends Document {
   userId: string;
   sessionId?: string | null; // null = legacy/global agent; otherwise per-session
@@ -19,6 +26,7 @@ export interface IAIAgent extends Document {
   isActive: boolean;
   fallbackToAI: boolean;
   knowledgeBase: IKnowledgeEntry[];
+  documents: IKnowledgeDocument[];
   updatedAt?: Date;
 }
 
@@ -26,6 +34,13 @@ const KnowledgeEntrySchema = new Schema({
   id: { type: String, required: true },
   question: { type: String, required: true },
   answer: { type: String, required: true }
+}, { _id: false });
+
+const KnowledgeDocumentSchema = new Schema({
+  id: { type: String, required: true },
+  name: { type: String, required: true },
+  content: { type: String, required: true },
+  chars: { type: Number, default: 0 }
 }, { _id: false });
 
 const AIAgentSchema = new Schema<IAIAgent>({
@@ -40,7 +55,8 @@ const AIAgentSchema = new Schema<IAIAgent>({
   aiModel: { type: String, default: 'llama-3.3-70b-versatile' },
   isActive: { type: Boolean, default: false },
   fallbackToAI: { type: Boolean, default: false },
-  knowledgeBase: { type: [KnowledgeEntrySchema], default: [] }
+  knowledgeBase: { type: [KnowledgeEntrySchema], default: [] },
+  documents: { type: [KnowledgeDocumentSchema], default: [] }
 }, { timestamps: true });
 
 // One agent per (user, session). sessionId=null is the legacy/global agent.
