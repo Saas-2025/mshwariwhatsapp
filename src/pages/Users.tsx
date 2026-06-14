@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UserPlus, User, Lock, AlertCircle, Trash2, Edit2, Ban, CheckCircle, X, Shield } from 'lucide-react';
+import { UserPlus, User, AlertCircle, Trash2, Edit2, Ban, CheckCircle, X, Shield } from 'lucide-react';
 
 const AVAILABLE_PERMISSIONS = [
     { id: 'devices', label: 'الأجهزة (وكل إعداداتها)' },
@@ -7,23 +7,74 @@ const AVAILABLE_PERMISSIONS = [
     { id: 'scheduled_campaigns', label: 'جدولة الحملات' },
 ];
 
+interface FormShape {
+    name: string;
+    username: string;
+    password: string;
+    role: 'admin' | 'user';
+    permissions: string[];
+    maxSessions: number;
+    isActive?: boolean;
+}
+
+// Shared role + permissions + limit controls (top-level so inputs keep focus on re-render)
+const RoleControls = ({ form, setForm }: { form: FormShape; setForm: (f: FormShape) => void }) => (
+    <>
+        <div>
+            <label className="block text-sm font-medium text-slate-500 mb-2">نوع الحساب</label>
+            <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-200 max-w-xs">
+                <button type="button" onClick={() => setForm({ ...form, role: 'user' })}
+                    className={`flex-1 py-2 text-sm rounded-lg font-bold transition-colors ${form.role === 'user' ? 'bg-emerald-500 text-white shadow' : 'text-slate-500'}`}>
+                    مستخدم عادي
+                </button>
+                <button type="button" onClick={() => setForm({ ...form, role: 'admin' })}
+                    className={`flex-1 py-2 text-sm rounded-lg font-bold transition-colors flex items-center justify-center gap-1 ${form.role === 'admin' ? 'bg-purple-500 text-white shadow' : 'text-slate-500'}`}>
+                    <Shield size={14} /> أدمن
+                </button>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">
+                {form.role === 'admin' ? 'الأدمن يرى كل سيشنات النظام ويتحكم فيها بدون قيود.' : 'المستخدم يرى سيشناته فقط، بحد أقصى تحدده أنت.'}
+            </p>
+        </div>
+
+        {form.role === 'user' && (
+            <>
+                <div>
+                    <label className="block text-sm font-medium text-slate-500 mb-1">الحد الأقصى للأجهزة (0 = بلا حد)</label>
+                    <input type="number" min="0" value={form.maxSessions}
+                        onChange={e => setForm({ ...form, maxSessions: Math.max(0, parseInt(e.target.value) || 0) })}
+                        className="w-40 bg-slate-50 border border-slate-200 p-3 rounded-xl focus:outline-none focus:border-emerald-500" />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-slate-500 mb-2">الصلاحيات المصرّح بها</label>
+                    <div className="flex gap-3 flex-wrap">
+                        {AVAILABLE_PERMISSIONS.map(perm => (
+                            <label key={perm.id} className="flex items-center gap-2 cursor-pointer bg-slate-50 px-3 py-2 rounded-lg border border-slate-200">
+                                <input type="checkbox" className="w-4 h-4 accent-emerald-500"
+                                    checked={form.permissions.includes(perm.id)}
+                                    onChange={e => setForm({ ...form, permissions: e.target.checked ? [...form.permissions, perm.id] : form.permissions.filter(p => p !== perm.id) })} />
+                                <span className="text-sm">{perm.label}</span>
+                            </label>
+                        ))}
+                    </div>
+                </div>
+            </>
+        )}
+    </>
+);
+
 const Users = () => {
     const [users, setUsers] = useState<any[]>([]);
 
-    // Create Form State
-    const [createForm, setCreateForm] = useState({ name: '', username: '', password: '', permissions: [] as string[] });
-
-    // Edit Form State
+    const [createForm, setCreateForm] = useState<FormShape>({ name: '', username: '', password: '', role: 'user', permissions: [], maxSessions: 0 });
     const [editingUser, setEditingUser] = useState<any | null>(null);
-    const [editForm, setEditForm] = useState({ name: '', username: '', password: '', isActive: true, permissions: [] as string[] });
+    const [editForm, setEditForm] = useState<FormShape>({ name: '', username: '', password: '', role: 'user', isActive: true, permissions: [], maxSessions: 0 });
 
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
     const [loading, setLoading] = useState(false);
 
-    useEffect(() => {
-        fetchUsers();
-    }, []);
+    useEffect(() => { fetchUsers(); }, []);
 
     const getApiUrl = () => {
         let url = import.meta.env.VITE_API_URL || 'http://localhost:3050';
@@ -34,41 +85,27 @@ const Users = () => {
     const fetchUsers = async () => {
         try {
             const token = localStorage.getItem('token');
-            const res = await fetch(`${getApiUrl()}/api/users`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setUsers(data);
-            }
-        } catch (err) {
-            console.error(err);
-        }
+            const res = await fetch(`${getApiUrl()}/api/users`, { headers: { Authorization: `Bearer ${token}` } });
+            if (res.ok) setUsers(await res.json());
+        } catch (err) { console.error(err); }
     };
 
     const handleCreateUser = async (e: React.FormEvent) => {
         e.preventDefault();
         setError(''); setSuccess(''); setLoading(true);
-
         try {
             const token = localStorage.getItem('token');
             const response = await fetch(`${getApiUrl()}/api/auth/register`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify(createForm),
             });
-
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || 'Failed to create user');
-
             setSuccess('تم إنشاء المستخدم بنجاح');
-            setCreateForm({ name: '', username: '', password: '', permissions: [] });
+            setCreateForm({ name: '', username: '', password: '', role: 'user', permissions: [], maxSessions: 0 });
             fetchUsers();
-        } catch (err: any) {
-            setError(err.message);
-        } finally {
-            setLoading(false);
-        }
+        } catch (err: any) { setError(err.message); } finally { setLoading(false); }
     };
 
     const handleEditClick = (user: any) => {
@@ -77,8 +114,10 @@ const Users = () => {
             name: user.name,
             username: user.username,
             password: '',
+            role: user.role || 'user',
             isActive: user.isActive,
-            permissions: user.permissions || []
+            permissions: user.permissions || [],
+            maxSessions: user.maxSessions || 0,
         });
         setError(''); setSuccess('');
     };
@@ -87,105 +126,64 @@ const Users = () => {
         e.preventDefault();
         if (!editingUser) return;
         setLoading(true);
-
         try {
             const token = localStorage.getItem('token');
             const response = await fetch(`${getApiUrl()}/api/users/${editingUser._id}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify(editForm),
             });
-
             if (!response.ok) throw new Error('Failed to update user');
-
             setSuccess('تم تحديث بيانات المستخدم');
             setEditingUser(null);
             fetchUsers();
-        } catch (err: any) {
-            setError(err.message);
-        } finally {
-            setLoading(false);
-        }
+        } catch (err: any) { setError(err.message); } finally { setLoading(false); }
     };
 
     const handleDeleteUser = async (id: string, name: string) => {
         if (!window.confirm(`هل أنت متأكد من حذف المستخدم "${name}" نهائياً؟`)) return;
-
         try {
             const token = localStorage.getItem('token');
-            const response = await fetch(`${getApiUrl()}/api/users/${id}`, {
-                method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
+            const response = await fetch(`${getApiUrl()}/api/users/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
             if (!response.ok) throw new Error('Failed to delete');
             fetchUsers();
             setSuccess(`تم حذف المستخدم ${name}`);
-        } catch (err: any) {
-            setError(err.message);
-        }
+        } catch (err: any) { setError(err.message); }
     };
 
     const toggleSuspend = async (user: any) => {
         const action = user.isActive ? 'إيقاف' : 'تفعيل';
         if (!window.confirm(`هل تريد ${action} حساب "${user.name}"؟`)) return;
-
         try {
             const token = localStorage.getItem('token');
             const response = await fetch(`${getApiUrl()}/api/users/${user._id}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ ...user, isActive: !user.isActive }),
             });
-
             if (!response.ok) throw new Error('Failed to update status');
             fetchUsers();
-        } catch (err: any) {
-            setError(err.message);
-        }
+        } catch (err: any) { setError(err.message); }
     };
 
     return (
         <div className="space-y-6">
             <h2 className="text-2xl font-bold text-slate-800">إدارة المستخدمين</h2>
 
-            {/* Notifications */}
             {error && <div className="bg-red-50 text-red-500 p-3 rounded-xl flex items-center gap-2"><AlertCircle size={16} /> {error}</div>}
             {success && <div className="bg-emerald-50 text-emerald-500 p-3 rounded-xl flex items-center gap-2"><CheckCircle size={16} /> {success}</div>}
 
-            {/* Create User Section */}
+            {/* Create */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                <h3 className="text-lg font-bold text-slate-700 mb-4 flex items-center gap-2">
-                    <UserPlus size={20} className="text-emerald-500" />
-                    إضافة مستخدم جديد
-                </h3>
-                <form onSubmit={handleCreateUser} className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <input type="text" placeholder="الاسم" value={createForm.name} onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })} className="bg-slate-50 border p-3 rounded-xl" required />
-                    <input type="text" placeholder="اسم المستخدم" value={createForm.username} onChange={(e) => setCreateForm({ ...createForm, username: e.target.value })} className="bg-slate-50 border p-3 rounded-xl" required />
-                    <input type="password" placeholder="كلمة المرور" value={createForm.password} onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })} className="bg-slate-50 border p-3 rounded-xl" required />
-                    <div className="md:col-span-3 border-t border-slate-100 pt-3 mt-1">
-                        <label className="block text-sm font-medium text-slate-500 mb-2">الصلاحيات المصرح بها:</label>
-                        <div className="flex gap-4 flex-wrap">
-                            {AVAILABLE_PERMISSIONS.map(perm => (
-                                <label key={perm.id} className="flex items-center gap-2 cursor-pointer bg-slate-50 px-3 py-2 rounded-lg border border-slate-200">
-                                    <input
-                                        type="checkbox"
-                                        className="w-4 h-4 accent-emerald-500"
-                                        checked={createForm.permissions.includes(perm.id)}
-                                        onChange={(e) => {
-                                            const newPerms = e.target.checked
-                                                ? [...createForm.permissions, perm.id]
-                                                : createForm.permissions.filter(p => p !== perm.id);
-                                            setCreateForm({ ...createForm, permissions: newPerms });
-                                        }}
-                                    />
-                                    <span className="text-sm">{perm.label}</span>
-                                </label>
-                            ))}
-                        </div>
+                <h3 className="text-lg font-bold text-slate-700 mb-4 flex items-center gap-2"><UserPlus size={20} className="text-emerald-500" /> إضافة مستخدم جديد</h3>
+                <form onSubmit={handleCreateUser} className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <input type="text" placeholder="الاسم" value={createForm.name} onChange={e => setCreateForm({ ...createForm, name: e.target.value })} className="bg-slate-50 border border-slate-200 p-3 rounded-xl" required />
+                        <input type="text" placeholder="اسم المستخدم" value={createForm.username} onChange={e => setCreateForm({ ...createForm, username: e.target.value })} className="bg-slate-50 border border-slate-200 p-3 rounded-xl" required />
+                        <input type="password" placeholder="كلمة المرور" value={createForm.password} onChange={e => setCreateForm({ ...createForm, password: e.target.value })} className="bg-slate-50 border border-slate-200 p-3 rounded-xl" required />
                     </div>
-
-                    <div className="md:col-span-3 flex justify-end">
+                    <RoleControls form={createForm} setForm={setCreateForm} />
+                    <div className="flex justify-end">
                         <button type="submit" disabled={loading} className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-8 rounded-xl transition-all disabled:opacity-50">
                             {loading ? 'جاري الإضافة...' : 'إضافة المستخدم'}
                         </button>
@@ -193,7 +191,7 @@ const Users = () => {
                 </form>
             </div>
 
-            {/* Users List Table */}
+            {/* List */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="w-full text-right">
@@ -202,7 +200,8 @@ const Users = () => {
                                 <th className="p-4">الاسم</th>
                                 <th className="p-4">اسم المستخدم</th>
                                 <th className="p-4">الحالة</th>
-                                <th className="p-4">الصلاحية</th>
+                                <th className="p-4">النوع</th>
+                                <th className="p-4">حد الأجهزة</th>
                                 <th className="p-4">إجراءات</th>
                             </tr>
                         </thead>
@@ -210,36 +209,25 @@ const Users = () => {
                             {users.map((user) => (
                                 <tr key={user._id} className="border-t border-slate-50 hover:bg-slate-50/50">
                                     <td className="p-4 font-bold flex items-center gap-2">
-                                        <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">
-                                            <User size={16} />
-                                        </div>
+                                        <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center"><User size={16} /></div>
                                         {user.name}
                                     </td>
                                     <td className="p-4">{user.username}</td>
                                     <td className="p-4">
-                                        <span className={`px-2 py-1 rounded-full text-xs font-bold ${user.isActive ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
-                                            {user.isActive ? 'نشط' : 'موقوف'}
-                                        </span>
+                                        <span className={`px-2 py-1 rounded-full text-xs font-bold ${user.isActive ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>{user.isActive ? 'نشط' : 'موقوف'}</span>
                                     </td>
                                     <td className="p-4">
-                                        <span className={`px-2 py-1 rounded text-xs font-bold ${user.role === 'admin' ? 'bg-purple-100 text-purple-600' : 'bg-slate-100 text-slate-600'}`}>
-                                            {user.role === 'admin' ? 'أدمن' : 'مستخدم'}
-                                        </span>
+                                        <span className={`px-2 py-1 rounded text-xs font-bold ${user.role === 'admin' ? 'bg-purple-100 text-purple-600' : 'bg-slate-100 text-slate-600'}`}>{user.role === 'admin' ? 'أدمن' : 'مستخدم'}</span>
                                     </td>
+                                    <td className="p-4 text-sm">{user.role === 'admin' ? '∞' : (user.maxSessions ? user.maxSessions : 'بلا حد')}</td>
                                     <td className="p-4 flex gap-2">
-                                        <button onClick={() => handleEditClick(user)} className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="تعديل">
-                                            <Edit2 size={18} />
-                                        </button>
-                                        <button onClick={() => toggleSuspend(user)} className={`p-2 rounded-lg ${user.isActive ? 'text-amber-500 hover:bg-amber-50' : 'text-green-500 hover:bg-green-50'}`} title={user.isActive ? 'إيقاف الحساب' : 'تفعيل الحساب'}>
-                                            {user.isActive ? <Ban size={18} /> : <CheckCircle size={18} />}
-                                        </button>
-                                        <button onClick={() => handleDeleteUser(user._id, user.name)} className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg" title="حذف">
-                                            <Trash2 size={18} />
-                                        </button>
+                                        <button onClick={() => handleEditClick(user)} className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="تعديل"><Edit2 size={18} /></button>
+                                        <button onClick={() => toggleSuspend(user)} className={`p-2 rounded-lg ${user.isActive ? 'text-amber-500 hover:bg-amber-50' : 'text-green-500 hover:bg-green-50'}`} title={user.isActive ? 'إيقاف الحساب' : 'تفعيل الحساب'}>{user.isActive ? <Ban size={18} /> : <CheckCircle size={18} />}</button>
+                                        <button onClick={() => handleDeleteUser(user._id, user.name)} className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg" title="حذف"><Trash2 size={18} /></button>
                                     </td>
                                 </tr>
                             ))}
-                            {users.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-slate-400">لا يوجد مستخدمين</td></tr>}
+                            {users.length === 0 && <tr><td colSpan={6} className="p-8 text-center text-slate-400">لا يوجد مستخدمين</td></tr>}
                         </tbody>
                     </table>
                 </div>
@@ -247,8 +235,8 @@ const Users = () => {
 
             {/* Edit Modal */}
             {editingUser && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-                    <div className="bg-white rounded-2xl w-full max-w-md p-6">
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" dir="rtl">
+                    <div className="bg-white rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto custom-scrollbar">
                         <div className="flex justify-between items-center mb-6">
                             <h3 className="text-xl font-bold">تعديل المستخدم</h3>
                             <button onClick={() => setEditingUser(null)} className="text-slate-400 hover:text-slate-600"><X /></button>
@@ -256,46 +244,27 @@ const Users = () => {
                         <form onSubmit={handleUpdateUser} className="space-y-4">
                             <div>
                                 <label className="block text-sm mb-1">الاسم</label>
-                                <input type="text" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="w-full border p-2 rounded-lg" required />
+                                <input type="text" value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} className="w-full border border-slate-200 bg-slate-50 p-2.5 rounded-xl" required />
                             </div>
                             <div>
                                 <label className="block text-sm mb-1">اسم المستخدم</label>
-                                <input type="text" value={editForm.username} onChange={(e) => setEditForm({ ...editForm, username: e.target.value })} className="w-full border p-2 rounded-lg" required />
+                                <input type="text" value={editForm.username} onChange={e => setEditForm({ ...editForm, username: e.target.value })} className="w-full border border-slate-200 bg-slate-50 p-2.5 rounded-xl" required />
                             </div>
                             <div>
                                 <label className="block text-sm mb-1">كلمة المرور الجديدة (اختياري)</label>
-                                <input type="password" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} className="w-full border p-2 rounded-lg" placeholder="اتركها فارغة للإبقاء على القديمة" />
-                            </div>
-                            <div className="space-y-2 mt-4">
-                                <label className="block text-sm font-medium text-slate-700">الصلاحيات</label>
-                                <div className="space-y-2 max-h-40 overflow-y-auto p-2 bg-slate-50 rounded-lg border border-slate-100">
-                                    {AVAILABLE_PERMISSIONS.map(perm => (
-                                        <label key={perm.id} className="flex items-center gap-2 cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                className="w-4 h-4 accent-emerald-500"
-                                                checked={editForm.permissions.includes(perm.id)}
-                                                onChange={(e) => {
-                                                    const newPerms = e.target.checked
-                                                        ? [...editForm.permissions, perm.id]
-                                                        : editForm.permissions.filter(p => p !== perm.id);
-                                                    setEditForm({ ...editForm, permissions: newPerms });
-                                                }}
-                                            />
-                                            <span className="text-sm">{perm.label}</span>
-                                        </label>
-                                    ))}
-                                </div>
+                                <input type="password" value={editForm.password} onChange={e => setEditForm({ ...editForm, password: e.target.value })} className="w-full border border-slate-200 bg-slate-50 p-2.5 rounded-xl" placeholder="اتركها فارغة للإبقاء على القديمة" />
                             </div>
 
-                            <div className="flex items-center gap-2 mt-4">
-                                <input type="checkbox" checked={editForm.isActive} onChange={(e) => setEditForm({ ...editForm, isActive: e.target.checked })} className="w-5 h-5 accent-emerald-500" />
+                            <RoleControls form={editForm} setForm={setEditForm} />
+
+                            <div className="flex items-center gap-2 mt-2">
+                                <input type="checkbox" checked={editForm.isActive} onChange={e => setEditForm({ ...editForm, isActive: e.target.checked })} className="w-5 h-5 accent-emerald-500" />
                                 <label>حساب نشط</label>
                             </div>
 
                             <div className="flex gap-3 mt-6">
-                                <button type="submit" className="flex-1 bg-emerald-500 text-white py-2 rounded-lg font-bold hover:bg-emerald-600">حفظ التغييرات</button>
-                                <button type="button" onClick={() => setEditingUser(null)} className="flex-1 bg-slate-100 text-slate-600 py-2 rounded-lg font-bold hover:bg-slate-200">إلغاء</button>
+                                <button type="submit" className="flex-1 bg-emerald-500 text-white py-2.5 rounded-xl font-bold hover:bg-emerald-600">حفظ التغييرات</button>
+                                <button type="button" onClick={() => setEditingUser(null)} className="flex-1 bg-slate-100 text-slate-600 py-2.5 rounded-xl font-bold hover:bg-slate-200">إلغاء</button>
                             </div>
                         </form>
                     </div>

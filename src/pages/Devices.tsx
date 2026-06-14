@@ -9,6 +9,7 @@ interface Session {
     status: 'IDLE' | 'QR' | 'CONNECTED' | 'ERROR' | 'connecting' | 'disconnected';
     qr?: string;
     phoneNumber?: string;
+    ownerName?: string;
     autoReplyEnabled?: boolean;
 }
 
@@ -131,7 +132,10 @@ const Devices: React.FC<DevicesProps> = ({ socket }) => {
                                         {session.status === 'CONNECTED' ? <CheckCircle2 size={32} /> : session.status === 'QR' ? <QrCode size={32} /> : <Smartphone size={32} />}
                                     </div>
                                     <h3 className="font-bold text-lg text-slate-800 mb-1">{session.name}</h3>
-                                    <p className="text-xs font-mono text-slate-400 mb-4 truncate max-w-full" dir="ltr">{session.id}</p>
+                                    <p className="text-xs font-mono text-slate-400 mb-2 truncate max-w-full" dir="ltr">{session.id}</p>
+                                    {session.ownerName && (
+                                        <span className="text-[10px] bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full mb-3 border border-purple-100">المالك: {session.ownerName}</span>
+                                    )}
 
                                     {session.status === 'QR' && session.qr ? (
                                         <div className="mb-4 bg-white p-2 rounded-xl border border-slate-100 shadow-sm"><QRCodeSVG value={session.qr} size={128} /></div>

@@ -6,6 +6,7 @@ export interface IUser extends Document {
     password?: string;
     role: 'admin' | 'user';
     permissions?: string[];
+    maxSessions?: number; // 0 = unlimited (admins are always unlimited)
     isActive?: boolean;
     createdAt?: string;
     updatedAt?: string;
@@ -17,6 +18,7 @@ const UserSchema = new Schema<IUser>({
     password: { type: String },
     role: { type: String, enum: ['admin', 'user'], default: 'user' },
     permissions: { type: [String], default: [] },
+    maxSessions: { type: Number, default: 0 }, // 0 = unlimited
     isActive: { type: Boolean, default: true }
 }, {
     timestamps: true

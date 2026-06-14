@@ -212,19 +212,21 @@ app.post('/api/auth/register', authenticateToken, requireAdmin, async (req: any,
     console.log('--> REGISTER REQUEST RECEIVED');
     console.log('Body:', JSON.stringify(req.body, null, 2));
     try {
-        const { name, username, password, permissions } = req.body;
+        const { name, username, password, permissions, role, maxSessions } = req.body;
         if (!name || !username || !password) return res.status(400).json({ error: 'Missing fields' });
 
         const existingUser = await storage.getItem('users', { username });
         if (existingUser) return res.status(400).json({ error: 'Username already exists' });
 
+        const isAdminRole = role === 'admin';
         const hashedPassword = await bcrypt.hash(password, 10);
         const user = await storage.saveItem('users', {
             name,
             username,
             password: hashedPassword,
-            role: 'user',
-            permissions: permissions || [],
+            role: isAdminRole ? 'admin' : 'user',
+            permissions: isAdminRole ? [] : (permissions || []),
+            maxSessions: isAdminRole ? 0 : Math.max(0, Number(maxSessions) || 0),
             isActive: true
         });
 
@@ -301,7 +303,7 @@ app.get('/api/users', authenticateToken, requireAdmin, async (req: any, res) => 
 app.put('/api/users/:id', authenticateToken, requireAdmin, async (req: any, res) => {
     try {
         const { id } = req.params;
-        const { name, username, password, isActive, permissions } = req.body;
+        const { name, username, password, isActive, permissions, role, maxSessions } = req.body;
 
         // Prevent suspending Admin
         const targetUser = await storage.getItem('users', { _id: id });
@@ -312,7 +314,16 @@ app.put('/api/users/:id', authenticateToken, requireAdmin, async (req: any, res)
         }
 
         const updateData: any = { _id: id, name, username, isActive };
-        if (permissions) updateData.permissions = permissions;
+
+        const effectiveRole = (role === 'admin' || role === 'user') ? role : targetUser.role;
+        updateData.role = effectiveRole;
+        if (effectiveRole === 'admin') {
+            updateData.permissions = [];
+            updateData.maxSessions = 0;
+        } else {
+            if (permissions) updateData.permissions = permissions;
+            if (maxSessions !== undefined) updateData.maxSessions = Math.max(0, Number(maxSessions) || 0);
+        }
 
         if (password && password.trim() !== '') {
             updateData.password = await bcrypt.hash(password, 10);
@@ -371,16 +382,25 @@ app.post('/api/auth/change-password', authenticateToken, async (req: any, res) =
 
 // Get User's Sessions
 app.get('/api/sessions', authenticateToken, async (req: any, res) => {
-    const userSessions = SessionService.getUserSessions(req.user.userId)
-        .map(s => ({
-            id: s.id,
-            name: s.name,
-            status: s.engine.currentStatus,
-            webhookUrl: s.webhookUrl, // Include Webhook URL
-            webhookUrls: s.webhookUrls || [], // Legacy
-            webhooks: s.webhooks || [] // New: Named Webhooks
-        }));
-    res.json(userSessions);
+    const isAdmin = req.user.role === 'admin';
+    const list = isAdmin ? SessionService.getAllSessions() : SessionService.getUserSessions(req.user.userId);
+
+    let ownerMap: Record<string, string> = {};
+    if (isAdmin) {
+        const users = await storage.getItems('users');
+        ownerMap = users.reduce((acc: any, u: any) => { acc[u._id] = u.name; return acc; }, {});
+    }
+
+    res.json(list.map(s => ({
+        id: s.id,
+        name: s.name,
+        status: s.engine.currentStatus,
+        userId: s.userId,
+        ownerName: isAdmin ? (ownerMap[s.userId] || '—') : undefined,
+        webhookUrl: s.webhookUrl,
+        webhookUrls: s.webhookUrls || [],
+        webhooks: s.webhooks || []
+    })));
 });
 
 
@@ -392,7 +412,7 @@ app.post('/api/sessions/:sessionId/send', authenticateToken, async (req: any, re
     const session = SessionService.getSession(sessionId);
 
     // Isolation Check
-    if (!session || session.userId !== req.user.userId) {
+    if (!session || session.userId !== req.user.userId && req.user.role !== 'admin') {
         return res.status(404).json({ error: 'Session not found or access denied', code: 'SESSION_NOT_FOUND' });
     }
 
@@ -444,7 +464,7 @@ app.get('/api/sessions/:sessionId/contacts', authenticateToken, async (req: any,
 
     const session = SessionService.getSession(sessionId);
     // Isolation Check
-    if (!session || session.userId !== req.user.userId) {
+    if (!session || session.userId !== req.user.userId && req.user.role !== 'admin') {
         return res.status(404).json({ error: 'Session not found or access denied' });
     }
 
@@ -464,7 +484,7 @@ app.get('/api/sessions/:sessionId/messages', authenticateToken, async (req: any,
 
     const session = SessionService.getSession(sessionId);
     // Isolation Check
-    if (!session || session.userId !== req.user.userId) {
+    if (!session || session.userId !== req.user.userId && req.user.role !== 'admin') {
         return res.status(404).json({ error: 'Session not found or access denied' });
     }
 
@@ -508,7 +528,7 @@ app.post('/api/sessions/:sessionId/messages', authenticateToken, async (req: any
     const session = SessionService.getSession(sessionId);
 
     // 2. Isolation & Status Check
-    if (!session || session.userId !== req.user.userId) {
+    if (!session || session.userId !== req.user.userId && req.user.role !== 'admin') {
         return res.status(404).json({ success: false, error_code: 'SESSION_NOT_FOUND', message: 'Session not found or access denied' });
     }
 
@@ -608,7 +628,7 @@ app.put('/api/sessions/:sessionId/webhook', authenticateToken, async (req: any, 
 
     // Isolation Check
     const session = await storage.getItem('sessions', { id: sessionId });
-    if (!session || session.userId !== req.user.userId) {
+    if (!session || session.userId !== req.user.userId && req.user.role !== 'admin') {
         return res.status(404).json({ error: 'Session not found or access denied' });
     }
 
@@ -661,7 +681,7 @@ app.put('/api/sessions/:sessionId/toggle-autoreply', authenticateToken, async (r
 
     // Isolation Check
     const session = await storage.getItem('sessions', { id: sessionId });
-    if (!session || session.userId !== req.user.userId) {
+    if (!session || session.userId !== req.user.userId && req.user.role !== 'admin') {
         return res.status(404).json({ error: 'Session not found or access denied' });
     }
 
@@ -759,10 +779,22 @@ app.put('/api/autoreply/:id/toggle', authenticateToken, async (req: any, res) =>
 
 // --- AI Agent Routes ---
 
+// A per-session AI agent belongs to the SESSION's owner. Returns the owner userId
+// the requester may manage (own session, or any session for admins), or null if denied.
+const resolveAgentOwner = (req: any, sessionId: string | null): string | null => {
+    if (!sessionId) return req.user.userId; // legacy global agent
+    const s = SessionService.getSession(sessionId);
+    if (!s) return req.user.userId; // not loaded yet; fall back to requester
+    if (s.userId === req.user.userId || req.user.role === 'admin') return s.userId;
+    return null;
+};
+
 app.get('/api/aiagent', authenticateToken, async (req: any, res) => {
     try {
         const sessionId = req.query.sessionId || null;
-        const agent = await storage.getItem('aiagent', { userId: req.user.userId, sessionId });
+        const ownerId = resolveAgentOwner(req, sessionId);
+        if (ownerId === null) return res.status(403).json({ error: 'Access denied' });
+        const agent = await storage.getItem('aiagent', { userId: ownerId, sessionId });
         if (!agent) {
             return res.json(null);
         }
@@ -777,11 +809,13 @@ app.post('/api/aiagent', authenticateToken, async (req: any, res) => {
     try {
         const { sessionId, name, role, about, welcomeMessage, systemPrompt, temperature, aiModel, isActive, fallbackToAI, knowledgeBase } = req.body;
         const sid = sessionId || null;
+        const ownerId = resolveAgentOwner(req, sid);
+        if (ownerId === null) return res.status(403).json({ error: 'Access denied' });
 
-        const existing = await storage.getItem('aiagent', { userId: req.user.userId, sessionId: sid });
+        const existing = await storage.getItem('aiagent', { userId: ownerId, sessionId: sid });
 
         const agentData: any = {
-            userId: req.user.userId,
+            userId: ownerId,
             sessionId: sid,
             name: name || 'AI Assistant',
             role: role || 'مساعد ذكي',
@@ -811,9 +845,11 @@ app.put('/api/aiagent/toggle', authenticateToken, async (req: any, res) => {
     try {
         const { sessionId, isActive, fallbackToAI } = req.body;
         const sid = sessionId || null;
+        const ownerId = resolveAgentOwner(req, sid);
+        if (ownerId === null) return res.status(403).json({ error: 'Access denied' });
         // Auto-create the agent (with schema defaults) if the user toggles before saving settings.
-        const existing = await storage.getItem('aiagent', { userId: req.user.userId, sessionId: sid })
-            || { userId: req.user.userId, sessionId: sid };
+        const existing = await storage.getItem('aiagent', { userId: ownerId, sessionId: sid })
+            || { userId: ownerId, sessionId: sid };
 
         if (isActive !== undefined) existing.isActive = isActive;
         if (fallbackToAI !== undefined) existing.fallbackToAI = fallbackToAI;
@@ -831,14 +867,16 @@ app.post('/api/aiagent/knowledge', authenticateToken, async (req: any, res) => {
         const { sessionId, question, answer } = req.body;
         if (!question || !answer) return res.status(400).json({ error: 'Missing question or answer' });
         const sid = sessionId || null;
+        const ownerId = resolveAgentOwner(req, sid);
+        if (ownerId === null) return res.status(403).json({ error: 'Access denied' });
 
         const { v4: uuidv4 } = await import('uuid');
         const entry = { id: uuidv4(), question, answer };
 
         // Auto-create the agent if it doesn't exist yet, so knowledge can be added
         // even before the user presses "Save settings".
-        const existing = await storage.getItem('aiagent', { userId: req.user.userId, sessionId: sid })
-            || { userId: req.user.userId, sessionId: sid, knowledgeBase: [] };
+        const existing = await storage.getItem('aiagent', { userId: ownerId, sessionId: sid })
+            || { userId: ownerId, sessionId: sid, knowledgeBase: [] };
 
         existing.knowledgeBase = [...(existing.knowledgeBase || []), entry];
         const saved = await storage.saveItem('aiagent', existing);
@@ -852,7 +890,9 @@ app.post('/api/aiagent/knowledge', authenticateToken, async (req: any, res) => {
 app.delete('/api/aiagent/knowledge/:entryId', authenticateToken, async (req: any, res) => {
     try {
         const sessionId = req.query.sessionId || null;
-        const existing = await storage.getItem('aiagent', { userId: req.user.userId, sessionId });
+        const ownerId = resolveAgentOwner(req, sessionId);
+        if (ownerId === null) return res.status(403).json({ error: 'Access denied' });
+        const existing = await storage.getItem('aiagent', { userId: ownerId, sessionId });
         if (!existing) return res.status(404).json({ error: 'AI Agent not configured yet' });
 
         existing.knowledgeBase = (existing.knowledgeBase || []).filter((k: any) => k.id !== req.params.entryId);
@@ -871,7 +911,7 @@ app.delete('/api/aiagent/knowledge/:entryId', authenticateToken, async (req: any
 app.get('/api/sessions/:sessionId/conversations', authenticateToken, async (req: any, res) => {
     const { sessionId } = req.params;
     const session = SessionService.getSession(sessionId);
-    if (!session || session.userId !== req.user.userId) {
+    if (!session || session.userId !== req.user.userId && req.user.role !== 'admin') {
         return res.status(404).json({ error: 'Session not found or access denied' });
     }
     try {
@@ -910,7 +950,7 @@ app.get('/api/sessions/:sessionId/conversations', authenticateToken, async (req:
 app.get('/api/sessions/:sessionId/conversations/:jid', authenticateToken, async (req: any, res) => {
     const { sessionId, jid } = req.params;
     const session = SessionService.getSession(sessionId);
-    if (!session || session.userId !== req.user.userId) {
+    if (!session || session.userId !== req.user.userId && req.user.role !== 'admin') {
         return res.status(404).json({ error: 'Session not found or access denied' });
     }
     try {
@@ -936,7 +976,7 @@ app.get('/api/sessions/:sessionId/conversations/:jid', authenticateToken, async 
 app.get('/api/sessions/:sessionId/analytics', authenticateToken, async (req: any, res) => {
     const { sessionId } = req.params;
     const session = SessionService.getSession(sessionId);
-    if (!session || session.userId !== req.user.userId) {
+    if (!session || session.userId !== req.user.userId && req.user.role !== 'admin') {
         return res.status(404).json({ error: 'Session not found or access denied' });
     }
     try {
@@ -1151,32 +1191,50 @@ io.use((socket, next) => {
 
 io.on('connection', (socket) => {
     const userId = socket.data.user.userId;
+    const isAdmin = socket.data.user.role === 'admin';
     console.log(`User connected: ${userId}`);
 
     // Join user room for private updates
     socket.join(`user:${userId}`);
 
-    // List Sessions (Filtered by User)
-    socket.on('list-sessions', () => {
-        const userSessions = SessionService.getUserSessions(userId)
-            .map(s => ({
-                id: s.id,
-                name: s.name,
-                status: s.engine.currentStatus,
-                webhookUrl: s.webhookUrl,
-                webhookUrls: s.webhookUrls || [],
-                webhooks: s.webhooks || []
-            }));
-        socket.emit('sessions-list', userSessions);
+    // List Sessions (admins see ALL sessions; regular users see only their own)
+    socket.on('list-sessions', async () => {
+        const list = isAdmin ? SessionService.getAllSessions() : SessionService.getUserSessions(userId);
+
+        let ownerMap: Record<string, string> = {};
+        if (isAdmin) {
+            const users = await storage.getItems('users');
+            ownerMap = users.reduce((acc: any, u: any) => { acc[u._id] = u.name; return acc; }, {});
+        }
+
+        socket.emit('sessions-list', list.map(s => ({
+            id: s.id,
+            name: s.name,
+            status: s.engine.currentStatus,
+            userId: s.userId,
+            ownerName: isAdmin ? (ownerMap[s.userId] || '—') : undefined,
+            webhookUrl: s.webhookUrl,
+            webhookUrls: s.webhookUrls || [],
+            webhooks: s.webhooks || []
+        })));
     });
 
-    // Create Session
+    // Create Session (enforce per-user session limit for non-admins)
     socket.on('create-session', async ({ name }, callback) => {
         try {
+            if (!isAdmin) {
+                const me = await storage.getItem('users', { _id: userId });
+                const limit = Number(me?.maxSessions) || 0;
+                if (limit > 0 && SessionService.getUserSessions(userId).length >= limit) {
+                    const msg = `وصلت للحد الأقصى من الأجهزة (${limit}). تواصل مع المسؤول لزيادة الحد.`;
+                    if (typeof callback === 'function') callback({ error: msg });
+                    return;
+                }
+            }
+
             const sessionId = await SessionService.createSession(userId, name);
 
             socket.emit('session-created', { id: sessionId, name, status: 'IDLE' });
-            // Only update this user
             io.to(`user:${userId}`).emit('sessions-updated');
 
             if (typeof callback === 'function') {
@@ -1192,7 +1250,7 @@ io.on('connection', (socket) => {
 
     // Delete Session
     socket.on('delete-session', async ({ sessionId }) => {
-        const result = await SessionService.deleteSession(sessionId, userId);
+        const result = await SessionService.deleteSession(sessionId, userId, isAdmin);
         if (result) {
             io.to(`user:${userId}`).emit('sessions-updated');
         }
@@ -1200,7 +1258,7 @@ io.on('connection', (socket) => {
 
     // Start Session (Connect)
     socket.on('start-session', async ({ sessionId }) => {
-        await SessionService.startSessionConnection(sessionId, userId, socket, io);
+        await SessionService.startSessionConnection(sessionId, userId, socket, io, isAdmin);
     });
 
     // Stop Campaign
@@ -1213,18 +1271,18 @@ io.on('connection', (socket) => {
         const { sessionId, numbers, type, content, caption, minDelay = 3, maxDelay = 10 } = data;
         const session = SessionService.getSession(sessionId);
 
-        // Security Check
-        if (!session || session.userId !== userId) {
+        // Security Check (admins may operate any session)
+        if (!session || (session.userId !== userId && !isAdmin)) {
             socket.emit('message-status', { error: 'Invalid Session or Access Denied' });
             return;
         }
 
-        await CampaignService.startCampaign(socket, data, session, userId);
+        await CampaignService.startCampaign(socket, data, session, isAdmin ? session.userId : userId);
     });
 
     // Logout
     socket.on('logout', async ({ sessionId }) => {
-        await SessionService.logoutSession(sessionId, userId, socket, io);
+        await SessionService.logoutSession(sessionId, userId, socket, io, isAdmin);
     });
 });
 

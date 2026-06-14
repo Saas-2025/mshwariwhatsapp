@@ -92,9 +92,9 @@ export class SessionService {
         return sessionId;
     }
 
-    static async deleteSession(sessionId: string, userId: string): Promise<boolean> {
+    static async deleteSession(sessionId: string, userId: string, isAdmin = false): Promise<boolean> {
         const session = this.sessions.get(sessionId);
-        if (!session || session.userId !== userId) return false;
+        if (!session || (session.userId !== userId && !isAdmin)) return false;
 
         await session.engine.logout();
         this.sessions.delete(sessionId);
@@ -107,9 +107,9 @@ export class SessionService {
         return true;
     }
 
-    static async startSessionConnection(sessionId: string, userId: string, socket: any, io: any) {
+    static async startSessionConnection(sessionId: string, userId: string, socket: any, io: any, isAdmin = false) {
         const session = this.sessions.get(sessionId);
-        if (!session || session.userId !== userId) {
+        if (!session || (session.userId !== userId && !isAdmin)) {
             socket.emit('error', 'Session not found');
             return;
         }
@@ -145,9 +145,9 @@ export class SessionService {
         }
     }
 
-    static async logoutSession(sessionId: string, userId: string, socket: any, io: any) {
+    static async logoutSession(sessionId: string, userId: string, socket: any, io: any, isAdmin = false) {
         const session = this.sessions.get(sessionId);
-        if (session && session.userId === userId) {
+        if (session && (session.userId === userId || isAdmin)) {
             await session.engine.logout();
             socket.emit('session-status', { sessionId, status: 'disconnected' });
 
