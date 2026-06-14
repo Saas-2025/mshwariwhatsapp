@@ -20,7 +20,7 @@ const App = () => {
   const [status, setStatus] = useState<'disconnected' | 'connecting' | 'qr' | 'connected' | 'error'>('disconnected');
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [socket, setSocket] = useState<any>(null);
-  const [systemName, setSystemName] = useState('Gateway WA');
+  const [systemName, setSystemName] = useState('SaaSBot');
 
   useEffect(() => {
     // Fetch System Settings

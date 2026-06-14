@@ -166,7 +166,7 @@ app.get('/api/settings', async (req: any, res: any) => {
         }, {});
 
         // Default if not set
-        if (!settingsObj.systemName) settingsObj.systemName = 'Gateway WA';
+        if (!settingsObj.systemName) settingsObj.systemName = 'SaaSBot';
 
         res.json(settingsObj);
     } catch (error) {

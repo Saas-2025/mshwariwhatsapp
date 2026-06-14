@@ -44,6 +44,7 @@ export async function getAIResponse(
     }
 
     systemContent += '\n\nقم بالرد باللغة العربية دائماً ما لم يطلب المستخدم لغة أخرى.';
+    systemContent += '\nاكتب الرد مباشرةً بنص الإجابة فقط، ولا تبدأ ردك بكلمة "الإجابة" أو "الجواب" أو "ج:" أو "س:".';
 
     const response = await fetch(GROQ_API_URL, {
       method: 'POST',
@@ -69,14 +70,19 @@ export async function getAIResponse(
     }
 
     const data: any = await response.json();
-    const reply = data?.choices?.[0]?.message?.content;
+    let reply = data?.choices?.[0]?.message?.content;
 
     if (!reply) {
       console.error('[AI] No response content from Groq API');
       return null;
     }
 
-    return reply.trim();
+    reply = reply.trim();
+    // Strip a leading "الإجابة:" / "الجواب:" / "ج:" the model may echo from the
+    // knowledge-base "س:/ج:" format, so the customer only sees the answer text.
+    reply = reply.replace(/^\s*(?:الإجابة|الاجابة|الجواب|إجابة|اجابة|ج)\s*[:：.\-–]\s*/u, '').trim();
+
+    return reply;
   } catch (error) {
     console.error('[AI] Error calling Groq API:', error);
     return null;
