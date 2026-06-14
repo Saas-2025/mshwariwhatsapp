@@ -26,9 +26,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, systemName }) => {
 
             const response = await fetch(`${API_URL}/api/auth/login`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password }),
             });
 
@@ -61,13 +59,12 @@ const Login: React.FC<LoginProps> = ({ onLogin, systemName }) => {
 
     return (
         <div
-            className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-slate-950"
+            className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-gradient-to-br from-slate-50 via-emerald-50/40 to-slate-100"
             dir="rtl"
         >
-            {/* Decorative gradient blobs */}
-            <div className="absolute -top-32 -right-32 w-96 h-96 bg-emerald-500/20 rounded-full blur-3xl" />
-            <div className="absolute -bottom-32 -left-32 w-96 h-96 bg-emerald-600/10 rounded-full blur-3xl" />
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[40rem] h-[40rem] bg-slate-800/20 rounded-full blur-3xl" />
+            {/* Soft decorative blobs */}
+            <div className="absolute -top-24 -right-24 w-96 h-96 bg-emerald-200/40 rounded-full blur-3xl" />
+            <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-emerald-100/50 rounded-full blur-3xl" />
 
             <div className="relative w-full max-w-md">
                 {/* Brand */}
@@ -75,14 +72,14 @@ const Login: React.FC<LoginProps> = ({ onLogin, systemName }) => {
                     <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-lg shadow-emerald-500/30 mb-4">
                         <Bot className="w-9 h-9 text-white" />
                     </div>
-                    <h1 className="text-3xl font-extrabold text-white tracking-tight">{systemName}</h1>
-                    <p className="text-slate-400 mt-1">لوحة التحكم — سجّل دخولك للمتابعة</p>
+                    <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">{systemName}</h1>
+                    <p className="text-slate-500 mt-1">لوحة التحكم — سجّل دخولك للمتابعة</p>
                 </div>
 
                 {/* Card */}
-                <div className="bg-slate-900/70 backdrop-blur-xl border border-slate-800 rounded-3xl p-8 shadow-2xl">
+                <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-xl shadow-slate-200/60">
                     {error && (
-                        <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-2xl mb-6 flex items-center gap-3">
+                        <div className="bg-red-50 border border-red-100 text-red-600 p-4 rounded-2xl mb-6 flex items-center gap-3">
                             <AlertCircle size={20} className="shrink-0" />
                             <span className="text-sm font-medium">{error}</span>
                         </div>
@@ -90,14 +87,14 @@ const Login: React.FC<LoginProps> = ({ onLogin, systemName }) => {
 
                     <form onSubmit={handleSubmit} className="space-y-5">
                         <div>
-                            <label className="block text-sm font-medium text-slate-300 mb-1.5">اسم المستخدم</label>
+                            <label className="block text-sm font-medium text-slate-600 mb-1.5">اسم المستخدم</label>
                             <div className="relative">
-                                <User className="absolute right-3 top-3.5 text-slate-500" size={20} />
+                                <User className="absolute right-3 top-3.5 text-slate-400" size={20} />
                                 <input
                                     type="text"
                                     value={username}
                                     onChange={(e) => setUsername(e.target.value)}
-                                    className="w-full bg-slate-950/60 border border-slate-700 text-white pr-11 pl-4 py-3 rounded-xl focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 transition-all placeholder:text-slate-600"
+                                    className="w-full bg-slate-50 border border-slate-200 text-slate-800 pr-11 pl-4 py-3 rounded-xl focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all placeholder:text-slate-400"
                                     placeholder="اسم المستخدم أو البريد الإلكتروني"
                                     required
                                 />
@@ -105,21 +102,21 @@ const Login: React.FC<LoginProps> = ({ onLogin, systemName }) => {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-slate-300 mb-1.5">كلمة المرور</label>
+                            <label className="block text-sm font-medium text-slate-600 mb-1.5">كلمة المرور</label>
                             <div className="relative">
-                                <Lock className="absolute right-3 top-3.5 text-slate-500" size={20} />
+                                <Lock className="absolute right-3 top-3.5 text-slate-400" size={20} />
                                 <input
                                     type={showPassword ? 'text' : 'password'}
                                     value={password}
                                     onChange={(e) => setPassword(e.target.value)}
-                                    className="w-full bg-slate-950/60 border border-slate-700 text-white pr-11 pl-11 py-3 rounded-xl focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 transition-all placeholder:text-slate-600"
+                                    className="w-full bg-slate-50 border border-slate-200 text-slate-800 pr-11 pl-11 py-3 rounded-xl focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all placeholder:text-slate-400"
                                     placeholder="••••••••"
                                     required
                                 />
                                 <button
                                     type="button"
                                     onClick={() => setShowPassword(s => !s)}
-                                    className="absolute left-3 top-3.5 text-slate-500 hover:text-slate-300 transition-colors"
+                                    className="absolute left-3 top-3.5 text-slate-400 hover:text-slate-600 transition-colors"
                                     tabIndex={-1}
                                 >
                                     {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
@@ -144,7 +141,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, systemName }) => {
                     </form>
                 </div>
 
-                <p className="text-center text-slate-600 text-xs mt-6">
+                <p className="text-center text-slate-400 text-xs mt-6">
                     © {systemName} — جميع الحقوق محفوظة
                 </p>
             </div>

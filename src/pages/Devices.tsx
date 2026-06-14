@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Smartphone, RefreshCw, QrCode, CheckCircle2, Plus, Trash2, X, AlertCircle, Code, Copy, Check, Bot, Sliders, Share2, Info } from 'lucide-react';
+import { Smartphone, RefreshCw, QrCode, CheckCircle2, Plus, Trash2, X, AlertCircle, Code, Copy, Check, Bot, Sliders, Share2, Info, Brain } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
+import AIAgentPanel from '../components/AIAgentPanel';
 
 interface Session {
     id: string;
@@ -18,7 +19,7 @@ interface DevicesProps {
     socket: any;
 }
 
-type SettingsTab = 'overview' | 'api' | 'webhook' | 'autoreply';
+type SettingsTab = 'overview' | 'ai' | 'api' | 'webhook' | 'autoreply';
 
 const Devices: React.FC<DevicesProps> = ({ socket }) => {
     const [sessions, setSessions] = useState<Session[]>([]);
@@ -282,9 +283,10 @@ const Devices: React.FC<DevicesProps> = ({ socket }) => {
 
     const settingsTabs: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
         { id: 'overview', label: 'نظرة عامة', icon: <Info size={16} /> },
+        { id: 'ai', label: 'الذكاء الاصطناعي', icon: <Brain size={16} /> },
         { id: 'api', label: 'الربط البرمجي', icon: <Code size={16} /> },
         { id: 'webhook', label: 'Webhook', icon: <Share2 size={16} /> },
-        { id: 'autoreply', label: 'الرد الآلي', icon: <Bot size={16} /> },
+        { id: 'autoreply', label: 'التشغيل العام', icon: <Bot size={16} /> },
     ];
 
     return (
@@ -339,7 +341,11 @@ const Devices: React.FC<DevicesProps> = ({ socket }) => {
                         const meta = statusMeta(session.status);
                         const isOffline = !session.status || session.status === 'IDLE' || session.status === 'ERROR' || session.status === 'disconnected';
                         return (
-                            <div key={session.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+                            <div
+                                key={session.id}
+                                onClick={() => openSettings(session)}
+                                className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col cursor-pointer hover:border-emerald-300 hover:shadow-md transition-all"
+                            >
                                 <div className="p-6 flex-1 flex flex-col items-center text-center">
                                     <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 ${meta.ring}`}>
                                         {session.status === 'CONNECTED' ? <CheckCircle2 size={32} /> :
@@ -365,21 +371,21 @@ const Devices: React.FC<DevicesProps> = ({ socket }) => {
                                     <div className="mt-auto w-full space-y-2">
                                         {isOffline ? (
                                             <button
-                                                onClick={() => handleStartSession(session.id)}
+                                                onClick={(e) => { e.stopPropagation(); handleStartSession(session.id); }}
                                                 className="w-full py-2.5 bg-emerald-500 text-white rounded-xl text-sm font-bold hover:bg-emerald-600 transition-colors shadow-lg shadow-emerald-500/20"
                                             >
                                                 ربط الجهاز
                                             </button>
                                         ) : session.status === 'CONNECTED' ? (
                                             <button
-                                                onClick={() => handleLogout(session.id)}
+                                                onClick={(e) => { e.stopPropagation(); handleLogout(session.id); }}
                                                 className="w-full py-2.5 bg-amber-50 text-amber-600 rounded-xl text-sm font-bold hover:bg-amber-100 transition-colors"
                                             >
                                                 تسجيل خروج
                                             </button>
                                         ) : (
                                             <button
-                                                onClick={() => handleLogout(session.id)}
+                                                onClick={(e) => { e.stopPropagation(); handleLogout(session.id); }}
                                                 className="w-full py-2.5 bg-slate-100 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"
                                             >
                                                 <RefreshCw size={16} /> إعادة تعيين الجلسة
@@ -387,10 +393,10 @@ const Devices: React.FC<DevicesProps> = ({ socket }) => {
                                         )}
 
                                         <button
-                                            onClick={() => openSettings(session)}
-                                            className="w-full py-2.5 bg-slate-50 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-100 transition-colors flex items-center justify-center gap-2 border border-slate-200"
+                                            onClick={(e) => { e.stopPropagation(); openSettings(session); }}
+                                            className="w-full py-2.5 bg-emerald-50 text-emerald-600 rounded-xl text-sm font-bold hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2 border border-emerald-100"
                                         >
-                                            <Sliders size={16} /> إعدادات الجهاز
+                                            <Sliders size={16} /> الإعدادات والذكاء الاصطناعي
                                         </button>
                                     </div>
                                 </div>
@@ -469,6 +475,11 @@ const Devices: React.FC<DevicesProps> = ({ socket }) => {
                                         <Trash2 size={16} /> حذف الجهاز نهائياً
                                     </button>
                                 </div>
+                            )}
+
+                            {/* AI Agent (per-session) */}
+                            {activeTab === 'ai' && (
+                                <AIAgentPanel sessionId={liveSettings.id} />
                             )}
 
                             {/* API */}
