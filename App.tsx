@@ -11,6 +11,7 @@ import ScheduledCampaigns from './src/pages/ScheduledCampaigns';
 import SessionDetail from './src/pages/SessionDetail';
 import Settings from './src/pages/Settings';
 import { Menu } from 'lucide-react';
+import { useLang } from './src/i18n';
 
 const App = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
@@ -90,18 +91,27 @@ const App = () => {
   const DashboardLayout = () => {
     if (!isAuthenticated) return <Navigate to="/login" replace />;
 
+    const { dir, t } = useLang();
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebarCollapsed') === '1');
+    const toggleCollapsed = () => setCollapsed(c => {
+      const n = !c;
+      localStorage.setItem('sidebarCollapsed', n ? '1' : '0');
+      return n;
+    });
 
     return (
-      <div className="flex bg-slate-50 min-h-screen font-sans" dir="rtl">
+      <div className="flex bg-slate-50 min-h-screen font-sans" dir={dir}>
         <Sidebar
           onLogout={handleAppLogout}
           isOpen={isSidebarOpen}
           onClose={() => setIsSidebarOpen(false)}
           systemName={systemName}
+          collapsed={collapsed}
+          onToggleCollapse={toggleCollapsed}
         />
 
-        <main className="flex-1 transition-all duration-300 md:mr-64 overflow-hidden">
+        <main className={`flex-1 transition-all duration-300 overflow-hidden ${collapsed ? 'md:mr-0' : 'md:mr-64'}`}>
           {/* Mobile Header */}
           <div className="md:hidden bg-emerald-900 text-white p-4 flex justify-between items-center sticky top-0 z-30 shadow-md">
             <h1 className="text-xl font-bold flex items-center gap-2">
@@ -111,6 +121,17 @@ const App = () => {
               <Menu size={24} />
             </button>
           </div>
+
+          {/* Desktop: reopen button shown when the menu is collapsed */}
+          {collapsed && (
+            <button
+              onClick={toggleCollapsed}
+              title={t('open_menu')}
+              className="hidden md:flex fixed top-4 right-4 z-40 bg-emerald-900 text-white p-2.5 rounded-xl shadow-lg hover:bg-emerald-800 transition-colors"
+            >
+              <Menu size={20} />
+            </button>
+          )}
 
           <div className="p-4 md:p-8 overflow-y-auto">
             <Outlet />

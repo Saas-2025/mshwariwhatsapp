@@ -293,12 +293,54 @@ const SessionDetail: React.FC<{ socket: any }> = ({ socket }) => {
                   <button onClick={() => copy(localStorage.getItem('token') || '', 'token')} className="p-3 bg-white border border-slate-200 rounded-lg text-slate-500 hover:text-emerald-500 hover:border-emerald-500 shrink-0">{tokenCopied ? <Check size={18} /> : <Copy size={18} />}</button>
                 </div>
               </div>
+              <p className="text-xs text-slate-500">الحقل <code className="bg-slate-100 px-1 rounded">content</code> يقبل رابط مباشر (URL) أو Base64. الأنواع المدعومة: text / image / video / audio / document.</p>
+
               <div>
-                <span className="text-xs font-bold bg-blue-100 text-blue-700 px-2 py-1 rounded">Text Message (JSON)</span>
+                <span className="text-xs font-bold bg-blue-100 text-blue-700 px-2 py-1 rounded">Text</span>
                 <pre className="mt-2 bg-slate-900 text-slate-50 p-4 rounded-xl text-xs font-mono overflow-x-auto">{`{
   "number": "201012345678",
   "type": "text",
   "content": "Hello via API!"
+}`}</pre>
+              </div>
+
+              <div>
+                <span className="text-xs font-bold bg-purple-100 text-purple-700 px-2 py-1 rounded">Image (URL)</span>
+                <pre className="mt-2 bg-slate-900 text-slate-50 p-4 rounded-xl text-xs font-mono overflow-x-auto">{`{
+  "number": "201012345678",
+  "type": "image",
+  "content": "https://example.com/photo.jpg",
+  "caption": "Check this out!"
+}`}</pre>
+              </div>
+
+              <div>
+                <span className="text-xs font-bold bg-purple-100 text-purple-700 px-2 py-1 rounded">Image (Base64)</span>
+                <pre className="mt-2 bg-slate-900 text-slate-50 p-4 rounded-xl text-xs font-mono overflow-x-auto">{`{
+  "number": "201012345678",
+  "type": "image",
+  "caption": "Receipt",
+  "content": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg..."
+}`}</pre>
+              </div>
+
+              <div>
+                <span className="text-xs font-bold bg-amber-100 text-amber-700 px-2 py-1 rounded">Document (PDF)</span>
+                <pre className="mt-2 bg-slate-900 text-slate-50 p-4 rounded-xl text-xs font-mono overflow-x-auto">{`{
+  "number": "201012345678",
+  "type": "document",
+  "content": "https://example.com/invoice.pdf",
+  "caption": "invoice.pdf"
+}`}</pre>
+              </div>
+
+              <div>
+                <span className="text-xs font-bold bg-rose-100 text-rose-700 px-2 py-1 rounded">Video / Audio</span>
+                <pre className="mt-2 bg-slate-900 text-slate-50 p-4 rounded-xl text-xs font-mono overflow-x-auto">{`{
+  "number": "201012345678",
+  "type": "video",
+  "content": "https://example.com/clip.mp4",
+  "caption": "Demo"
 }`}</pre>
               </div>
             </div>

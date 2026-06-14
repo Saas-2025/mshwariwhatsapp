@@ -1,6 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import { LangProvider } from './src/i18n';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) throw new Error('فشل العثور على عنصر root');
@@ -8,6 +9,8 @@ if (!rootElement) throw new Error('فشل العثور على عنصر root');
 const root = createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <App />
+    <LangProvider>
+      <App />
+    </LangProvider>
   </React.StrictMode>
 );

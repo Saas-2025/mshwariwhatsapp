@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LogIn, User, Lock, AlertCircle, Bot, Eye, EyeOff } from 'lucide-react';
+import { useLang } from '../i18n';
 
 interface LoginProps {
     onLogin: () => void;
@@ -8,6 +9,7 @@ interface LoginProps {
 }
 
 const Login: React.FC<LoginProps> = ({ onLogin, systemName }) => {
+    const { t, dir } = useLang();
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
@@ -60,7 +62,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, systemName }) => {
     return (
         <div
             className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-gradient-to-br from-slate-50 via-emerald-50/40 to-slate-100"
-            dir="rtl"
+            dir={dir}
         >
             {/* Soft decorative blobs */}
             <div className="absolute -top-24 -right-24 w-96 h-96 bg-emerald-200/40 rounded-full blur-3xl" />
@@ -73,7 +75,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, systemName }) => {
                         <Bot className="w-9 h-9 text-white" />
                     </div>
                     <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">{systemName}</h1>
-                    <p className="text-slate-500 mt-1">لوحة التحكم — سجّل دخولك للمتابعة</p>
+                    <p className="text-slate-500 mt-1">{t('login_subtitle')}</p>
                 </div>
 
                 {/* Card */}
@@ -87,7 +89,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, systemName }) => {
 
                     <form onSubmit={handleSubmit} className="space-y-5">
                         <div>
-                            <label className="block text-sm font-medium text-slate-600 mb-1.5">اسم المستخدم</label>
+                            <label className="block text-sm font-medium text-slate-600 mb-1.5">{t('username')}</label>
                             <div className="relative">
                                 <User className="absolute right-3 top-3.5 text-slate-400" size={20} />
                                 <input
@@ -95,14 +97,14 @@ const Login: React.FC<LoginProps> = ({ onLogin, systemName }) => {
                                     value={username}
                                     onChange={(e) => setUsername(e.target.value)}
                                     className="w-full bg-slate-50 border border-slate-200 text-slate-800 pr-11 pl-4 py-3 rounded-xl focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all placeholder:text-slate-400"
-                                    placeholder="اسم المستخدم أو البريد الإلكتروني"
+                                    placeholder={t('username_ph')}
                                     required
                                 />
                             </div>
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-slate-600 mb-1.5">كلمة المرور</label>
+                            <label className="block text-sm font-medium text-slate-600 mb-1.5">{t('password')}</label>
                             <div className="relative">
                                 <Lock className="absolute right-3 top-3.5 text-slate-400" size={20} />
                                 <input
@@ -134,7 +136,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, systemName }) => {
                             ) : (
                                 <>
                                     <LogIn size={20} />
-                                    <span>دخول</span>
+                                    <span>{t('signin')}</span>
                                 </>
                             )}
                         </button>
@@ -142,7 +144,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, systemName }) => {
                 </div>
 
                 <p className="text-center text-slate-400 text-xs mt-6">
-                    © {systemName} — جميع الحقوق محفوظة
+                    © {systemName} — {t('rights')}
                 </p>
             </div>
         </div>
