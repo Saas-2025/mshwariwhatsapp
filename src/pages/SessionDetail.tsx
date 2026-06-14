@@ -2,12 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Smartphone, RefreshCw, QrCode, CheckCircle2, Trash2, X, Code, Copy, Check, Bot,
-  Share2, Info, Brain, MessageSquare, BarChart3, ChevronRight, Plus
+  Share2, Info, Brain, MessageSquare, BarChart3, ChevronRight, Plus, Facebook
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import AIAgentPanel from '../components/AIAgentPanel';
 import ConversationsPanel from '../components/ConversationsPanel';
 import AnalyticsPanel from '../components/AnalyticsPanel';
+import FacebookPanel from '../components/FacebookPanel';
 
 interface Session {
   id: string;
@@ -21,7 +22,7 @@ interface Session {
   autoReplyEnabled?: boolean;
 }
 
-type Tab = 'overview' | 'ai' | 'conversations' | 'analytics' | 'api' | 'webhook';
+type Tab = 'overview' | 'ai' | 'facebook' | 'conversations' | 'analytics' | 'api' | 'webhook';
 
 const apiBase = () => (import.meta.env.VITE_API_URL?.replace(/\/$/, '') || `${window.location.protocol}//${window.location.hostname}:3050`);
 const authHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` });
@@ -164,6 +165,7 @@ const SessionDetail: React.FC<{ socket: any }> = ({ socket }) => {
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'overview', label: 'نظرة عامة', icon: <Info size={16} /> },
     { id: 'ai', label: 'الذكاء الاصطناعي', icon: <Brain size={16} /> },
+    { id: 'facebook', label: 'صفحة فيسبوك', icon: <Facebook size={16} /> },
     { id: 'conversations', label: 'سجل المحادثات', icon: <MessageSquare size={16} /> },
     { id: 'analytics', label: 'تحليل الردود', icon: <BarChart3 size={16} /> },
     { id: 'api', label: 'الربط البرمجي', icon: <Code size={16} /> },
@@ -250,6 +252,7 @@ const SessionDetail: React.FC<{ socket: any }> = ({ socket }) => {
           )}
 
           {activeTab === 'ai' && <AIAgentPanel sessionId={session.id} />}
+          {activeTab === 'facebook' && <FacebookPanel sessionId={session.id} />}
           {activeTab === 'conversations' && <ConversationsPanel sessionId={session.id} />}
           {activeTab === 'analytics' && <AnalyticsPanel sessionId={session.id} />}
 

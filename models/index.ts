@@ -9,3 +9,4 @@ export * from './Setting.js';
 export * from './ScheduledCampaign.js';
 export * from './AIAgent.js';
 export * from './ChatLog.js';
+export * from './FacebookConnection.js';

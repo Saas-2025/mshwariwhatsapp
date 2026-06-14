@@ -12,6 +12,7 @@ import { SessionService } from './services/sessionService.js';
 // import { Action } from './models/Action.js'; removed bad import
 import { AutoReplyService } from './services/autoReplyService.js';
 import { SchedulerService } from './services/schedulerService.js';
+import { getAIResponse } from './services/aiService.js';
 import { IUser } from './models/User.js';
 import { ISession } from './models/Session.js';
 import { ISetting } from './models/Setting.js';
@@ -1255,6 +1256,171 @@ app.delete('/api/scheduled-campaigns/:id', authenticateToken, async (req: any, r
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: 'Failed to delete campaign' });
+    }
+});
+
+// ============================================================
+// Facebook Page Integration (Messenger messages + feed comments)
+// ============================================================
+
+const fbProcessed = new Set<string>(); // simple in-memory idempotency for mids/comment ids
+
+const fbSendMessage = async (token: string, recipientId: string, text: string) => {
+    try {
+        const r = await fetch(`https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(token)}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ recipient: { id: recipientId }, messaging_type: 'RESPONSE', message: { text } })
+        });
+        if (!r.ok) console.error('[FB] send message failed:', await r.text());
+    } catch (e) { console.error('[FB] send message error:', e); }
+};
+
+const fbReplyToComment = async (token: string, commentId: string, message: string) => {
+    try {
+        const r = await fetch(`https://graph.facebook.com/v19.0/${commentId}/comments?access_token=${encodeURIComponent(token)}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message })
+        });
+        if (!r.ok) console.error('[FB] reply comment failed:', await r.text());
+    } catch (e) { console.error('[FB] reply comment error:', e); }
+};
+
+const fbGenerateReply = async (sessionId: string, remoteJid: string, userText: string, extra?: string): Promise<string | null> => {
+    const agent = await storage.getItem('aiagent', { sessionId });
+    if (!agent || !agent.isActive) return null;
+    const rows = await ChatLog.find({ sessionId, remoteJid }).sort({ timestamp: -1 }).limit(12).lean();
+    const history = rows.reverse().map((r: any) => ({ role: r.role, text: r.text }));
+    const agentForReply = extra ? { ...agent, systemPrompt: `${agent.systemPrompt || ''}\n${extra}` } : agent;
+    return await getAIResponse(agentForReply as any, userText, history);
+};
+
+const fbLog = async (conn: any, remoteJid: string, role: 'user' | 'assistant', text: string, source: 'ai' | 'manual') => {
+    try {
+        await ChatLog.create({ sessionId: conn.sessionId, userId: conn.userId, remoteJid, role, text: (text || '').slice(0, 4000), source, timestamp: Math.floor(Date.now() / 1000) });
+    } catch { /* ignore */ }
+};
+
+const handleFbMessage = async (conn: any, senderId: string, text: string, mid?: string) => {
+    if (mid) { if (fbProcessed.has('m:' + mid)) return; fbProcessed.add('m:' + mid); }
+    const remoteJid = `fb:${senderId}`;
+    await fbLog(conn, remoteJid, 'user', text, 'manual');
+    const reply = await fbGenerateReply(conn.sessionId, remoteJid, text);
+    if (!reply) return;
+    await fbSendMessage(conn.pageAccessToken, senderId, reply);
+    await fbLog(conn, remoteJid, 'assistant', reply, 'ai');
+};
+
+const handleFbComment = async (conn: any, commentId: string, text: string) => {
+    if (fbProcessed.has('c:' + commentId)) return;
+    fbProcessed.add('c:' + commentId);
+    const remoteJid = `fbc:${commentId}`;
+    await fbLog(conn, remoteJid, 'user', text, 'manual');
+    const reply = await fbGenerateReply(conn.sessionId, remoteJid, text, 'هذا تعليق عام على منشور في فيسبوك. ردّ باختصار ولباقة، ووجّه العميل للرسائل الخاصة إن احتاج تفاصيل أكثر.');
+    if (!reply) return;
+    await fbReplyToComment(conn.pageAccessToken, commentId, reply);
+    await fbLog(conn, remoteJid, 'assistant', reply, 'ai');
+};
+
+// Webhook verification (Meta calls this once when you set the callback URL)
+app.get('/api/facebook/webhook', async (req: any, res: any) => {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+    if (mode === 'subscribe' && token) {
+        if (process.env.FB_VERIFY_TOKEN && token === process.env.FB_VERIFY_TOKEN) return res.status(200).send(challenge);
+        const match = await storage.getItem('facebook', { verifyToken: token });
+        if (match) return res.status(200).send(challenge);
+    }
+    return res.sendStatus(403);
+});
+
+// Webhook events (incoming messages + comments)
+app.post('/api/facebook/webhook', async (req: any, res: any) => {
+    res.sendStatus(200); // acknowledge immediately so Meta doesn't retry
+    try {
+        const body = req.body;
+        if (!body || body.object !== 'page') return;
+        for (const entry of body.entry || []) {
+            const pageId = entry.id;
+            const conn = await storage.getItem('facebook', { pageId });
+            if (!conn || !conn.isActive || !conn.pageAccessToken) continue;
+
+            if (Array.isArray(entry.messaging) && conn.replyToMessages) {
+                for (const ev of entry.messaging) {
+                    if (ev.message && !ev.message.is_echo && ev.message.text && ev.sender?.id) {
+                        await handleFbMessage(conn, ev.sender.id, ev.message.text, ev.message.mid);
+                    }
+                }
+            }
+
+            if (Array.isArray(entry.changes) && conn.replyToComments) {
+                for (const ch of entry.changes) {
+                    const v = ch.value || {};
+                    if (ch.field === 'feed' && v.item === 'comment' && v.verb === 'add' && v.message && v.comment_id) {
+                        if (v.from?.id && v.from.id === pageId) continue; // skip the page's own comments
+                        await handleFbComment(conn, v.comment_id, v.message);
+                    }
+                }
+            }
+        }
+    } catch (e) { console.error('[FB] webhook error:', e); }
+});
+
+// Get FB connection config for a session (access token masked)
+app.get('/api/sessions/:sessionId/facebook', authenticateToken, async (req: any, res: any) => {
+    const { sessionId } = req.params;
+    const session = SessionService.getSession(sessionId);
+    if (!session || (session.userId !== req.user.userId && req.user.role !== 'admin')) {
+        return res.status(404).json({ error: 'Session not found or access denied' });
+    }
+    const conn = await storage.getItem('facebook', { sessionId });
+    if (!conn) return res.json(null);
+    res.json({
+        pageId: conn.pageId || '',
+        pageName: conn.pageName || '',
+        verifyToken: conn.verifyToken || '',
+        hasToken: !!conn.pageAccessToken,
+        tokenHint: conn.pageAccessToken ? '••••••' + String(conn.pageAccessToken).slice(-4) : '',
+        replyToMessages: conn.replyToMessages !== false,
+        replyToComments: conn.replyToComments !== false,
+        isActive: !!conn.isActive
+    });
+});
+
+// Save FB connection config
+app.put('/api/sessions/:sessionId/facebook', authenticateToken, async (req: any, res: any) => {
+    const { sessionId } = req.params;
+    const session = SessionService.getSession(sessionId);
+    if (!session || (session.userId !== req.user.userId && req.user.role !== 'admin')) {
+        return res.status(404).json({ error: 'Session not found or access denied' });
+    }
+    try {
+        const { pageId, pageName, pageAccessToken, verifyToken, replyToMessages, replyToComments, isActive } = req.body;
+        const existing = await storage.getItem('facebook', { sessionId });
+
+        const data: any = {
+            sessionId,
+            userId: session.userId,
+            pageId: (pageId ?? existing?.pageId ?? '').trim(),
+            pageName: pageName ?? existing?.pageName ?? '',
+            verifyToken: (verifyToken || existing?.verifyToken || '').trim(),
+            replyToMessages: replyToMessages !== undefined ? !!replyToMessages : (existing?.replyToMessages ?? true),
+            replyToComments: replyToComments !== undefined ? !!replyToComments : (existing?.replyToComments ?? true),
+            isActive: isActive !== undefined ? !!isActive : (existing?.isActive ?? false)
+        };
+        // Only replace the token if a new, real one was provided (not the masked hint)
+        if (pageAccessToken && pageAccessToken.trim() && !pageAccessToken.includes('••')) {
+            data.pageAccessToken = pageAccessToken.trim();
+        } else if (existing?.pageAccessToken) {
+            data.pageAccessToken = existing.pageAccessToken;
+        }
+        if (existing?._id) data._id = existing._id;
+
+        await storage.saveItem('facebook', data);
+        res.json({ success: true });
+    } catch (e: any) {
+        console.error('[FB] save config error:', e);
+        res.status(500).json({ error: e.message });
     }
 });
 
