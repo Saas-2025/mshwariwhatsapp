@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MessageSquare, Smartphone, User, Bot, RefreshCw, Search } from 'lucide-react';
+import { MessageSquare, User, Bot, RefreshCw, Search, ChevronRight } from 'lucide-react';
 
 interface SessionLite { id: string; name: string; status: string; }
 interface Convo { remoteJid: string; number: string; pushName?: string; lastText: string; lastRole: string; lastTime: number; total: number; }
@@ -89,7 +89,7 @@ const Conversations = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-[70vh]">
         {/* Chat List */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
+        <div className={`bg-white rounded-2xl border border-slate-200 shadow-sm flex-col overflow-hidden ${activeJid ? 'hidden md:flex' : 'flex'}`}>
           <div className="p-3 border-b border-slate-100 relative">
             <Search size={16} className="absolute right-6 top-6 text-slate-400" />
             <input
@@ -125,7 +125,7 @@ const Conversations = () => {
         </div>
 
         {/* Thread */}
-        <div className="md:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
+        <div className={`md:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm flex-col overflow-hidden ${activeJid ? 'flex' : 'hidden md:flex'}`}>
           {!activeJid ? (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
               <MessageSquare size={48} className="opacity-20 mb-3" />
@@ -134,6 +134,9 @@ const Conversations = () => {
           ) : (
             <>
               <div className="p-4 border-b border-slate-100 flex items-center gap-3">
+                <button onClick={() => setActiveJid(null)} className="md:hidden text-slate-400 hover:text-slate-600 p-1 -mr-1" title="رجوع">
+                  <ChevronRight size={22} />
+                </button>
                 <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold">
                   {(convos.find(c => c.remoteJid === activeJid)?.pushName || activeJid).charAt(0).toUpperCase()}
                 </div>

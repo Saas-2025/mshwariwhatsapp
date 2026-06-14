@@ -447,7 +447,7 @@ const Devices: React.FC<DevicesProps> = ({ socket }) => {
                         </div>
 
                         {/* Tab Content */}
-                        <div className="p-6 overflow-y-auto custom-scrollbar">
+                        <div className="p-4 md:p-6 overflow-y-auto custom-scrollbar">
                             {/* Overview */}
                             {activeTab === 'overview' && (
                                 <div className="space-y-4">

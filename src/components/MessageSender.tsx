@@ -387,7 +387,7 @@ const MessageSender: React.FC<MessageSenderProps> = ({ socket, status }) => {
                 )}
 
                 {/* Footer Actions */}
-                <div className="flex items-center gap-4 pt-4 border-t border-slate-100">
+                <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-slate-100">
                     <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200">
                         <Clock size={16} className="text-slate-400" />
                         <span className="text-xs text-slate-400 font-bold">عشوائي من</span>
