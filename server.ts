@@ -703,6 +703,45 @@ app.put('/api/sessions/:sessionId/toggle-autoreply', authenticateToken, async (r
 });
 
 
+// Session settings (auto-reply master switch + save-conversations privacy toggle)
+app.get('/api/sessions/:sessionId/settings', authenticateToken, async (req: any, res) => {
+    const { sessionId } = req.params;
+    const session = await storage.getItem('sessions', { id: sessionId });
+    if (!session || (session.userId !== req.user.userId && req.user.role !== 'admin')) {
+        return res.status(404).json({ error: 'Session not found or access denied' });
+    }
+    res.json({
+        autoReplyEnabled: session.autoReplyEnabled !== false,
+        saveConversations: session.saveConversations !== false
+    });
+});
+
+app.put('/api/sessions/:sessionId/settings', authenticateToken, async (req: any, res) => {
+    const { sessionId } = req.params;
+    const session = await storage.getItem('sessions', { id: sessionId });
+    if (!session || (session.userId !== req.user.userId && req.user.role !== 'admin')) {
+        return res.status(404).json({ error: 'Session not found or access denied' });
+    }
+    try {
+        const { autoReplyEnabled, saveConversations } = req.body;
+        const updated: any = { ...session };
+        if (autoReplyEnabled !== undefined) updated.autoReplyEnabled = !!autoReplyEnabled;
+        if (saveConversations !== undefined) updated.saveConversations = !!saveConversations;
+        if (updated._id) delete updated._id;
+        delete updated.createdAt;
+        delete updated.updatedAt;
+        await storage.saveItem('sessions', updated);
+        res.json({
+            success: true,
+            autoReplyEnabled: updated.autoReplyEnabled !== false,
+            saveConversations: updated.saveConversations !== false
+        });
+    } catch (e: any) {
+        console.error('[Session Settings] error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // --- Auto Reply Routes ---
 
 app.get('/api/autoreply', authenticateToken, async (req: any, res) => {
@@ -1340,13 +1379,16 @@ const fbReplyToComment = async (token: string, commentId: string, message: strin
     } catch (e) { console.error('[FB] reply comment error:', e); }
 };
 
-const fbGenerateReply = async (sessionId: string, remoteJid: string, userText: string, extra?: string): Promise<string | null> => {
+const fbGenerateReply = async (sessionId: string, remoteJid: string, userText: string, extra?: string, useMemory = true): Promise<string | null> => {
     const agent = await storage.getItem('aiagent', { sessionId });
     if (!agent || !agent.isActive) return null;
-    const rows = await ChatLog.find({ sessionId, remoteJid }).sort({ timestamp: -1 }).limit(12).lean();
-    const history = rows.reverse().map((r: any) => ({ role: r.role, text: r.text }));
+    let history: { role: string; text: string }[] = [];
+    if (useMemory) {
+        const rows = await ChatLog.find({ sessionId, remoteJid }).sort({ timestamp: -1 }).limit(12).lean();
+        history = rows.reverse().map((r: any) => ({ role: r.role, text: r.text }));
+    }
     const agentForReply = extra ? { ...agent, systemPrompt: `${agent.systemPrompt || ''}\n${extra}` } : agent;
-    return await getAIResponse(agentForReply as any, userText, history);
+    return await getAIResponse(agentForReply as any, userText, history as any);
 };
 
 const fbLog = async (conn: any, remoteJid: string, role: 'user' | 'assistant', text: string, source: 'ai' | 'manual') => {
@@ -1355,25 +1397,32 @@ const fbLog = async (conn: any, remoteJid: string, role: 'user' | 'assistant', t
     } catch { /* ignore */ }
 };
 
+const fbShouldSave = async (sessionId: string) => {
+    const sess = await storage.getItem('sessions', { id: sessionId });
+    return !(sess && sess.saveConversations === false);
+};
+
 const handleFbMessage = async (conn: any, senderId: string, text: string, mid?: string) => {
     if (mid) { if (fbProcessed.has('m:' + mid)) return; fbProcessed.add('m:' + mid); }
     const remoteJid = `fb:${senderId}`;
-    await fbLog(conn, remoteJid, 'user', text, 'manual');
-    const reply = await fbGenerateReply(conn.sessionId, remoteJid, text);
+    const saveConvos = await fbShouldSave(conn.sessionId);
+    if (saveConvos) await fbLog(conn, remoteJid, 'user', text, 'manual');
+    const reply = await fbGenerateReply(conn.sessionId, remoteJid, text, undefined, saveConvos);
     if (!reply) return;
     await fbSendMessage(conn.pageAccessToken, senderId, reply);
-    await fbLog(conn, remoteJid, 'assistant', reply, 'ai');
+    if (saveConvos) await fbLog(conn, remoteJid, 'assistant', reply, 'ai');
 };
 
 const handleFbComment = async (conn: any, commentId: string, text: string) => {
     if (fbProcessed.has('c:' + commentId)) return;
     fbProcessed.add('c:' + commentId);
     const remoteJid = `fbc:${commentId}`;
-    await fbLog(conn, remoteJid, 'user', text, 'manual');
-    const reply = await fbGenerateReply(conn.sessionId, remoteJid, text, 'هذا تعليق عام على منشور في فيسبوك. ردّ باختصار ولباقة، ووجّه العميل للرسائل الخاصة إن احتاج تفاصيل أكثر.');
+    const saveConvos = await fbShouldSave(conn.sessionId);
+    if (saveConvos) await fbLog(conn, remoteJid, 'user', text, 'manual');
+    const reply = await fbGenerateReply(conn.sessionId, remoteJid, text, 'هذا تعليق عام على منشور في فيسبوك. ردّ باختصار ولباقة، ووجّه العميل للرسائل الخاصة إن احتاج تفاصيل أكثر.', saveConvos);
     if (!reply) return;
     await fbReplyToComment(conn.pageAccessToken, commentId, reply);
-    await fbLog(conn, remoteJid, 'assistant', reply, 'ai');
+    if (saveConvos) await fbLog(conn, remoteJid, 'assistant', reply, 'ai');
 };
 
 // Webhook verification (Meta calls this once when you set the callback URL)

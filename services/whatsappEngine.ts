@@ -436,6 +436,7 @@ export class WhatsAppEngine {
             try {
               const sessionState = await storage.getItem('sessions', { id: this.sessionId });
               const replyDisabled = !!(sessionState && sessionState.autoReplyEnabled === false);
+              const saveConvos = !(sessionState && sessionState.saveConversations === false);
 
               // Human takeover: muted only while within the takeover window; auto-resume after it elapses.
               let isMuted = false;
@@ -457,10 +458,10 @@ export class WhatsAppEngine {
                 // current turn, so the prompt history doesn't duplicate it.
                 const agent = await this.getSessionAgent();
                 const aiActive = !!(agent && agent.isActive);
-                const history = aiActive ? await this.buildHistory(remoteJid) : [];
+                const history = (aiActive && saveConvos) ? await this.buildHistory(remoteJid) : [];
 
-                // Always record the inbound customer message (memory / history / analytics)
-                await this.logChat(remoteJid, 'user', textContent, pushName);
+                // Record the inbound message (skipped if saving is disabled for this session)
+                if (saveConvos) await this.logChat(remoteJid, 'user', textContent, pushName);
 
                 if (replyDisabled) {
                   console.log(`[Reply] SKIP ${remoteJid}: auto-reply is OFF for this session (master switch "التشغيل العام").`);
@@ -481,7 +482,7 @@ export class WhatsAppEngine {
                         sentMessagesCache.set(aiSent.key.id, aiSent);
                         setTimeout(() => this.sentMessageIds.delete(aiSent.key.id!), 15000);
                       }
-                      await this.logChat(remoteJid, 'assistant', aiReply, undefined, 'ai');
+                      if (saveConvos) await this.logChat(remoteJid, 'assistant', aiReply, undefined, 'ai');
                       console.log(`[AI] Sent AI response to ${remoteJid}`);
                     } else {
                       console.warn(`[Reply] NO REPLY ${remoteJid}: AI returned nothing — check GROQ_API_KEY / Groq rate limits.`);
@@ -534,7 +535,7 @@ export class WhatsAppEngine {
                         }
                         setTimeout(() => this.sentMessageIds.delete(sentMsg.key.id!), 15000);
                       }
-                      await this.logChat(remoteJid, 'assistant', responseText || `[${matchedRule.replyType || 'text'}]`, undefined, 'keyword');
+                      if (saveConvos) await this.logChat(remoteJid, 'assistant', responseText || `[${matchedRule.replyType || 'text'}]`, undefined, 'keyword');
                       console.log(`[AutoReply] Sent ${matchedRule.replyType || 'text'} response.`);
                     } catch (sendErr) {
                       console.error('[AutoReply] Failed to send response:', sendErr);

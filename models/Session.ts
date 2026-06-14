@@ -10,6 +10,7 @@ export interface ISession extends Document {
   webhookUrls?: string[]; // Legacy (Keep for migration if needed, or deprecate)
   webhooks?: { name: string; url: string }[]; // New: Named Webhooks
   autoReplyEnabled?: boolean; // Toggles all auto-replies for this session
+  saveConversations?: boolean; // If false, this session's chats are not stored (no logs/analytics/memory)
   createdAt?: string;
   updatedAt?: string;
 }
@@ -36,6 +37,10 @@ const SessionSchema = new Schema<ISession>({
     default: 'IDLE'
   },
   autoReplyEnabled: {
+    type: Boolean,
+    default: true
+  },
+  saveConversations: {
     type: Boolean,
     default: true
   }

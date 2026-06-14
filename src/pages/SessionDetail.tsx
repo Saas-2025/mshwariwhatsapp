@@ -49,6 +49,7 @@ const SessionDetail: React.FC<{ socket: any }> = ({ socket }) => {
   const [webhookNameInput, setWebhookNameInput] = useState('');
   const [webhookUrlInput, setWebhookUrlInput] = useState('');
   const [webhooksList, setWebhooksList] = useState<{ name: string; url: string }[]>([]);
+  const [settings, setSettings] = useState<{ autoReplyEnabled: boolean; saveConversations: boolean }>({ autoReplyEnabled: true, saveConversations: true });
 
   useEffect(() => {
     if (!socket) return;
@@ -94,6 +95,28 @@ const SessionDetail: React.FC<{ socket: any }> = ({ socket }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.id]);
 
+  // Load session settings (auto-reply master switch + save-conversations)
+  useEffect(() => {
+    if (!sessionId) return;
+    (async () => {
+      try {
+        const res = await fetch(`${apiBase()}/api/sessions/${sessionId}/settings`, { headers: authHeaders() });
+        if (res.ok) setSettings(await res.json());
+      } catch { /* ignore */ }
+    })();
+  }, [sessionId]);
+
+  const updateSetting = async (patch: Partial<{ autoReplyEnabled: boolean; saveConversations: boolean }>) => {
+    const prev = settings;
+    setSettings(s => ({ ...s, ...patch }));
+    try {
+      const res = await fetch(`${apiBase()}/api/sessions/${sessionId}/settings`, {
+        method: 'PUT', headers: authHeaders(), body: JSON.stringify(patch)
+      });
+      if (!res.ok) { setSettings(prev); alert('فشل حفظ الإعداد'); }
+    } catch { setSettings(prev); }
+  };
+
   const copy = (text: string, which: 'url' | 'token') => {
     navigator.clipboard.writeText(text);
     if (which === 'url') { setCopied(true); setTimeout(() => setCopied(false), 2000); }
@@ -109,23 +132,6 @@ const SessionDetail: React.FC<{ socket: any }> = ({ socket }) => {
     if (confirm('هل أنت متأكد من حذف هذا الجهاز نهائياً؟')) {
       socket?.emit('delete-session', { sessionId });
       navigate('/devices');
-    }
-  };
-
-  const toggleAutoReply = async () => {
-    if (!session) return;
-    const isEnabled = session.autoReplyEnabled !== false;
-    setSession(prev => prev ? { ...prev, autoReplyEnabled: !isEnabled } : prev);
-    try {
-      const res = await fetch(`${apiBase()}/api/sessions/${sessionId}/toggle-autoreply`, {
-        method: 'PUT', headers: authHeaders(), body: JSON.stringify({ enabled: !isEnabled })
-      });
-      if (!res.ok) {
-        setSession(prev => prev ? { ...prev, autoReplyEnabled: isEnabled } : prev);
-        alert('فشل تغيير حالة التشغيل');
-      }
-    } catch {
-      setSession(prev => prev ? { ...prev, autoReplyEnabled: isEnabled } : prev);
     }
   };
 
@@ -223,17 +229,31 @@ const SessionDetail: React.FC<{ socket: any }> = ({ socket }) => {
                 </div>
               </div>
 
-              {/* Master auto-reply toggle */}
-              <div className={`flex items-center justify-between rounded-xl p-4 border ${session.autoReplyEnabled !== false ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
+              {/* Auto-reply master switch */}
+              <div className={`flex items-center justify-between rounded-xl p-4 border ${settings.autoReplyEnabled ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
                 <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${session.autoReplyEnabled !== false ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-400'}`}><Bot size={20} /></div>
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${settings.autoReplyEnabled ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-400'}`}><Bot size={20} /></div>
                   <div>
                     <p className="font-bold text-slate-700">التشغيل العام للردود</p>
                     <p className="text-xs text-slate-400">مفتاح رئيسي يوقف/يشغّل كل الردود الآلية لهذا الجهاز</p>
                   </div>
                 </div>
-                <button onClick={toggleAutoReply} className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${session.autoReplyEnabled !== false ? 'bg-emerald-500' : 'bg-slate-300'}`}>
-                  <span className={`inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform ${session.autoReplyEnabled !== false ? 'translate-x-1' : 'translate-x-6'}`} />
+                <button onClick={() => updateSetting({ autoReplyEnabled: !settings.autoReplyEnabled })} className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${settings.autoReplyEnabled ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                  <span className={`inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform ${settings.autoReplyEnabled ? 'translate-x-1' : 'translate-x-6'}`} />
+                </button>
+              </div>
+
+              {/* Save conversations (privacy) */}
+              <div className={`flex items-center justify-between rounded-xl p-4 border ${settings.saveConversations ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'}`}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${settings.saveConversations ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-400'}`}><MessageSquare size={20} /></div>
+                  <div>
+                    <p className="font-bold text-slate-700">حفظ المحادثات</p>
+                    <p className="text-xs text-slate-400">{settings.saveConversations ? 'يتم حفظ المحادثات (سجل + تحليلات + ذاكرة الـ AI)' : 'لا يتم حفظ محادثات هذا الجهاز — بدون سجل أو تحليلات أو ذاكرة (خصوصية)'}</p>
+                  </div>
+                </div>
+                <button onClick={() => updateSetting({ saveConversations: !settings.saveConversations })} className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${settings.saveConversations ? 'bg-blue-600' : 'bg-slate-300'}`}>
+                  <span className={`inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform ${settings.saveConversations ? 'translate-x-1' : 'translate-x-6'}`} />
                 </button>
               </div>
 
