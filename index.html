@@ -7,17 +7,29 @@
   <title>SaaSBot | لوحة التحكم</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    // Use Cairo as the default font for all Tailwind `font-sans` utilities too
+    // Saudi DGA-aligned theme: IBM Plex Sans Arabic + the national green palette.
+    // Remapping Tailwind's `emerald`/`green` to the Saudi green means every existing
+    // utility class adopts the unified identity with no per-file changes.
+    const saudiGreen = {
+      50: '#e9f6ef', 100: '#cfe9dd', 200: '#a6d6bf', 300: '#6fbe99',
+      400: '#3da174', 500: '#1b8354', 600: '#156a45', 700: '#115437',
+      800: '#0e432c', 900: '#0c3724'
+    };
     tailwind.config = {
-      theme: { extend: { fontFamily: { sans: ['Cairo', 'sans-serif'] } } }
+      theme: {
+        extend: {
+          fontFamily: { sans: ['"IBM Plex Sans Arabic"', 'sans-serif'] },
+          colors: { emerald: saudiGreen, green: saudiGreen, primary: saudiGreen }
+        }
+      }
     };
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     body {
-      font-family: 'Cairo', sans-serif;
+      font-family: 'IBM Plex Sans Arabic', sans-serif;
       margin: 0;
       padding: 0;
       background-color: #f8fafc;

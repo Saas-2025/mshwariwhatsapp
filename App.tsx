@@ -103,7 +103,7 @@ const App = () => {
 
         <main className="flex-1 transition-all duration-300 md:mr-64 overflow-hidden">
           {/* Mobile Header */}
-          <div className="md:hidden bg-slate-900 text-white p-4 flex justify-between items-center sticky top-0 z-30 shadow-md">
+          <div className="md:hidden bg-emerald-900 text-white p-4 flex justify-between items-center sticky top-0 z-30 shadow-md">
             <h1 className="text-xl font-bold flex items-center gap-2">
               {systemName}
             </h1>

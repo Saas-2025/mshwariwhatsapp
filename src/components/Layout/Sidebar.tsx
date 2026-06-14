@@ -46,34 +46,34 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout, isOpen, onClose, systemName
 
             {/* Sidebar */}
             <div className={`
-                fixed top-0 right-0 h-screen w-64 bg-slate-900 text-slate-300 
-                flex flex-col border-l border-slate-800 z-50 shadow-2xl
+                fixed top-0 right-0 h-screen w-64 bg-emerald-900 text-emerald-100/80
+                flex flex-col border-l border-emerald-800 z-50 shadow-2xl
                 transition-transform duration-300 ease-in-out
                 ${isOpen ? 'translate-x-0' : 'translate-x-full'} 
                 md:translate-x-0 md:shadow-none
             `}>
-                <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+                <div className="p-6 border-b border-emerald-800 flex justify-between items-center">
                     <h1 className="text-2xl font-bold text-white flex items-center gap-2">
                         {systemName}
                     </h1>
                     {/* Close Button Mobile */}
                     <button
                         onClick={onClose}
-                        className="md:hidden text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
+                        className="md:hidden text-emerald-200 hover:text-white p-1 rounded-lg hover:bg-emerald-800 transition-colors"
                     >
                         <X size={24} />
                     </button>
                 </div>
 
-                <div className="p-4 border-b border-slate-800 bg-slate-800/50">
+                <div className="p-4 border-b border-emerald-800 bg-emerald-800/40">
                     <div className="flex items-center gap-3">
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg
-                            ${isAdmin ? 'bg-purple-500 text-white' : 'bg-emerald-500 text-white'}`}>
+                            ${isAdmin ? 'bg-amber-400 text-emerald-900' : 'bg-white text-emerald-700'}`}>
                             {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
                         </div>
                         <div className="overflow-hidden">
                             <p className="text-white font-medium truncate">{user.name}</p>
-                            <p className="text-xs text-slate-400 truncate">{user.email}</p>
+                            <p className="text-xs text-emerald-200/70 truncate">{user.email}</p>
                         </div>
                     </div>
                 </div>
@@ -86,8 +86,8 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout, isOpen, onClose, systemName
                             onClick={() => onClose()} // Close on navigate on mobile
                             className={({ isActive }) =>
                                 `flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive
-                                    ? 'bg-emerald-500/10 text-emerald-400 font-bold'
-                                    : 'hover:bg-slate-800 hover:text-white'
+                                    ? 'bg-white/15 text-white font-bold shadow-sm'
+                                    : 'hover:bg-emerald-800 hover:text-white'
                                 }`
                             }
                         >
@@ -97,10 +97,10 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout, isOpen, onClose, systemName
                     ))}
                 </nav>
 
-                <div className="p-4 border-t border-slate-800">
+                <div className="p-4 border-t border-emerald-800">
                     <button
                         onClick={onLogout}
-                        className="flex items-center gap-3 px-4 py-3 rounded-xl w-full text-red-400 hover:bg-red-500/10 transition-all font-bold"
+                        className="flex items-center gap-3 px-4 py-3 rounded-xl w-full text-red-200 hover:bg-red-500/20 hover:text-white transition-all font-bold"
                     >
                         <LogOut size={20} />
                         <span>تسجيل الخروج</span>
