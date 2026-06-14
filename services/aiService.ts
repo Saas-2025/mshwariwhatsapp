@@ -100,28 +100,36 @@ export async function getAIResponse(
     systemContent += '\n\nردّ باللغة العربية (أو بلهجة العميل) ما لم يطلب لغة أخرى، بأسلوب ودّي ومختصر.';
     systemContent += '\nاكتب الرد مباشرةً بنص الإجابة فقط، ولا تبدأ ردك بكلمة "الإجابة" أو "الجواب" أو "ج:" أو "س:".';
 
-    const response = await fetch(GROQ_API_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: MODEL_MIGRATIONS[agent.aiModel] || agent.aiModel || 'llama-3.3-70b-versatile',
-        messages: [
-          { role: 'system', content: systemContent },
-          // Prior turns of THIS conversation give the model full context/memory
-          ...history.filter(h => h.text).map(h => ({ role: h.role, content: h.text })),
-          { role: 'user', content: userMessage }
-        ],
-        temperature: agent.temperature ?? 0.7,
-        max_tokens: 1024
-      })
+    const requestBody = JSON.stringify({
+      model: MODEL_MIGRATIONS[agent.aiModel] || agent.aiModel || 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: systemContent },
+        // Prior turns of THIS conversation give the model full context/memory
+        ...history.filter(h => h.text).map(h => ({ role: h.role, content: h.text })),
+        { role: 'user', content: userMessage }
+      ],
+      temperature: agent.temperature ?? 0.7,
+      max_tokens: 1024
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[AI] Groq API error (${response.status}): ${errorText}`);
+    // Retry transient errors (rate limit / 5xx) so a momentary 429 doesn't drop the reply
+    let response: Response | undefined;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      response = await fetch(GROQ_API_URL, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: requestBody
+      });
+      if (response.ok) break;
+      if (![429, 500, 502, 503].includes(response.status)) break;
+      const wait = (attempt + 1) * 1200;
+      console.warn(`[AI] Groq returned ${response.status}; retrying in ${wait}ms (attempt ${attempt + 1}/3)`);
+      await new Promise(r => setTimeout(r, wait));
+    }
+
+    if (!response || !response.ok) {
+      const errorText = response ? await response.text() : 'no response';
+      console.error(`[AI] Groq API error (${response?.status}): ${errorText}`);
       return null;
     }
 
