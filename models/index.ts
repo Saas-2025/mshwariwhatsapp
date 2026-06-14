@@ -8,3 +8,4 @@ export * from './MutedChat.js';
 export * from './Setting.js';
 export * from './ScheduledCampaign.js';
 export * from './AIAgent.js';
+export * from './ChatLog.js';

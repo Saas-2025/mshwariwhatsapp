@@ -5,7 +5,9 @@ const AVAILABLE_PERMISSIONS = [
     { id: 'devices', label: 'الأجهزة المتصلة' },
     { id: 'campaigns', label: 'إرسال الحملات' },
     { id: 'scheduled_campaigns', label: 'جدولة الحملات' },
-    { id: 'autoreply', label: 'الرد الآلي' },
+    { id: 'aiagent', label: 'AI Agent' },
+    { id: 'conversations', label: 'سجل المحادثات' },
+    { id: 'analytics', label: 'تحليل الردود' },
 ];
 
 const Users = () => {

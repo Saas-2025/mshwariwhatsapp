@@ -8,6 +8,7 @@ export interface IKnowledgeEntry {
 
 export interface IAIAgent extends Document {
   userId: string;
+  sessionId?: string | null; // null = legacy/global agent; otherwise per-session
   name: string;
   role: string;
   about: string;
@@ -28,7 +29,8 @@ const KnowledgeEntrySchema = new Schema({
 }, { _id: false });
 
 const AIAgentSchema = new Schema<IAIAgent>({
-  userId: { type: String, required: true, unique: true },
+  userId: { type: String, required: true },
+  sessionId: { type: String, default: null },
   name: { type: String, default: 'AI Assistant' },
   role: { type: String, default: 'مساعد ذكي' },
   about: { type: String, default: 'أنا مساعد ذكي أرد على استفسارات العملاء.' },
@@ -40,5 +42,8 @@ const AIAgentSchema = new Schema<IAIAgent>({
   fallbackToAI: { type: Boolean, default: false },
   knowledgeBase: { type: [KnowledgeEntrySchema], default: [] }
 }, { timestamps: true });
+
+// One agent per (user, session). sessionId=null is the legacy/global agent.
+AIAgentSchema.index({ userId: 1, sessionId: 1 }, { unique: true });
 
 export const AIAgent = mongoose.model<IAIAgent>('AIAgent', AIAgentSchema);

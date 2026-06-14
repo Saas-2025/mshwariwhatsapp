@@ -14,7 +14,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { storage } from './storage.js';
 import { AutoReplyService } from './autoReplyService.js';
 import { useMongoDBAuthState } from './mongoAuth.js';
-import { AuthState, Message, AIAgent } from '../models/index.js';
+import { AuthState, Message, AIAgent, ChatLog } from '../models/index.js';
 import { getAIResponse } from './aiService.js';
 
 
@@ -429,137 +429,101 @@ export class WhatsAppEngine {
               console.error('[Webhook] Error:', whErr);
             }
 
-            // --- Auto Reply Logic ---
+            // --- Auto Reply: AI + Knowledge (primary), keyword rules (legacy fallback) ---
             try {
-              // Fetch latest session settings to check global toggle
               const sessionState = await storage.getItem('sessions', { id: this.sessionId });
+              const replyDisabled = !!(sessionState && sessionState.autoReplyEnabled === false);
 
-              if (sessionState && sessionState.autoReplyEnabled === false) {
-                console.log(`[AutoReply] Skipped for ${remoteJid} (Auto-Replies disabled globally for session ${this.sessionId})`);
-                continue; // Skip the rest of the auto-reply block
-              }
-
-              // 0. Check if Chat is Muted (Human Takeover)
+              // Human takeover: if the owner replied manually, this chat is muted
               const isMuted = await storage.getItem('muted_chats', { sessionId: this.sessionId, chatId: remoteJid });
 
-              if (isMuted) {
-                // Still check for match to help debug, but don't send
-                console.log(`[AutoReply] [Muted Mode] Rule check for ${remoteJid} (skipped sending).`);
-              } else if (textContent) {
-                console.log(`[AutoReply] [DEBUG] Checking rules. User: ${this.userId}, Session: ${this.sessionId}, Content: "${textContent}"`);
-                const matchedRule = await AutoReplyService.getResponse(this.userId, textContent, this.sessionId);
+              if (textContent) {
+                // Resolve the per-session AI agent and build memory BEFORE logging the
+                // current turn, so the prompt history doesn't duplicate it.
+                const agent = await this.getSessionAgent();
+                const aiActive = !!(agent && agent.isActive);
+                const history = aiActive ? await this.buildHistory(remoteJid) : [];
 
-                if (matchedRule) {
-                  console.log(`[AutoReply] Match found! RuleID: ${matchedRule._id} | Type: ${matchedRule.replyType || 'text'}`);
+                // Always record the inbound customer message (memory / history / analytics)
+                await this.logChat(remoteJid, 'user', textContent, pushName);
 
-                  // Simulate human behavior
-                  const isAudio = matchedRule.replyType === 'audio';
-                  const presenceType = isAudio ? 'recording' : 'composing';
-
-                  // 1. Initial "thinking" delay
-                  await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
-
-                  // 2. Start presence
-                  await this.sock.sendPresenceUpdate(presenceType, remoteJid);
-
-                  // 3. Typing/Recording duration based on content or random
-                  const humanDelay = isAudio ? 4000 : Math.min(8000, 3000 + (matchedRule.response.length * 50));
-                  console.log(`[AutoReply] ${presenceType} for ${humanDelay}ms...`);
-
-                  await new Promise(r => setTimeout(r, humanDelay));
-                  await this.sock.sendPresenceUpdate('paused', remoteJid);
-
-                  // Send Reply based on Type
-                  const responseText = matchedRule.response; // Caption or Text
-
+                if (replyDisabled) {
+                  console.log(`[AutoReply] Reply disabled for session ${this.sessionId} — logged only.`);
+                } else if (isMuted) {
+                  console.log(`[AutoReply] [Muted] ${remoteJid} (human takeover) — logged only.`);
+                } else if (aiActive) {
+                  // 1) AI Agent is the PRIMARY responder (knowledge base + conversation memory)
                   try {
-                    let sentMsg;
-                    if (matchedRule.replyType === 'image' && matchedRule.mediaUrl) {
-                      sentMsg = await this.sock.sendMessage(remoteJid, {
-                        image: { url: matchedRule.mediaUrl },
-                        caption: responseText
-                      }, { quoted: msg });
-
-                    } else if (matchedRule.replyType === 'video' && matchedRule.mediaUrl) {
-                      sentMsg = await this.sock.sendMessage(remoteJid, {
-                        video: { url: matchedRule.mediaUrl },
-                        caption: responseText
-                      }, { quoted: msg });
-
-                    } else if (matchedRule.replyType === 'document' && matchedRule.mediaUrl) {
-                      sentMsg = await this.sock.sendMessage(remoteJid, {
-                        document: { url: matchedRule.mediaUrl },
-                        mimetype: 'application/pdf', // Default, maybe detect from extension later
-                        fileName: matchedRule.fileName || 'file.pdf',
-                        caption: responseText
-                      }, { quoted: msg });
-
-                    } else if (matchedRule.replyType === 'audio' && matchedRule.mediaUrl) {
-                      sentMsg = await this.sock.sendMessage(remoteJid, {
-                        audio: { url: matchedRule.mediaUrl },
-                        ptt: true // Send as Voice Note
-                      }, { quoted: msg });
-
-                    } else {
-                      // Default: Text
-                      sentMsg = await this.sock.sendMessage(remoteJid, { text: responseText }, { quoted: msg });
-                    }
-
-                    if (sentMsg?.key?.id) {
-                      this.sentMessageIds.add(sentMsg.key.id);
-                      sentMessagesCache.set(sentMsg.key.id, sentMsg);
-
-                      // v13/v20: Persistent Store for retries (Strict JSON string)
-                      try {
-                        await Message.create({
-                          sessionId: this.sessionId,
-                          remoteJid: remoteJid,
-                          fromMe: true,
-                          id: sentMsg.key.id,
-                          // v20: Force stringify using Baileys replacer to protect Uint8Arrays
-                          content: JSON.stringify(sentMsg.message, BufferJSON.replacer),
-                          timestamp: Math.floor(Date.now() / 1000)
-                        });
-                      } catch (dbErr) {
-                        console.error('[Engine] Failed to persist auto-reply for retry:', dbErr);
+                    const aiReply = await getAIResponse(agent as any, textContent, history);
+                    if (aiReply) {
+                      await new Promise(r => setTimeout(r, 800 + Math.random() * 1500));
+                      await this.sock.sendPresenceUpdate('composing', remoteJid);
+                      await new Promise(r => setTimeout(r, Math.min(6000, 1500 + aiReply.length * 25)));
+                      await this.sock.sendPresenceUpdate('paused', remoteJid);
+                      const aiSent = await this.sock.sendMessage(remoteJid, { text: aiReply }, { quoted: msg });
+                      if (aiSent?.key?.id) {
+                        this.sentMessageIds.add(aiSent.key.id);
+                        sentMessagesCache.set(aiSent.key.id, aiSent);
+                        setTimeout(() => this.sentMessageIds.delete(aiSent.key.id!), 15000);
                       }
-
-                      setTimeout(() => this.sentMessageIds.delete(sentMsg.key.id!), 15000);
-                    }
-                    console.log(`[AutoReply] Sent ${matchedRule.replyType || 'text'} response.`);
-
-                  } catch (sendErr) {
-                    console.error('[AutoReply] Failed to send response:', sendErr);
-                    // Fallback to text if media fails?
-                    await this.sock.sendMessage(remoteJid, { text: `[Error sending media] ${responseText}` }, { quoted: msg });
-                  }
-
-                } else {
-                  // --- AI Fallback: No keyword match, try AI agent ---
-                  try {
-                    if (textContent) {
-                      const agent = await AIAgent.findOne({ userId: this.userId }).lean();
-                      if (agent && agent.isActive && agent.fallbackToAI) {
-                        console.log(`[AI] No keyword match, trying AI agent for: ${remoteJid}`);
-                        const aiReply = await getAIResponse(agent as any, textContent);
-                        if (aiReply) {
-                          await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
-                          await this.sock.sendPresenceUpdate('composing', remoteJid);
-                          await new Promise(r => setTimeout(r, Math.min(6000, 2000 + aiReply.length * 30)));
-                          await this.sock.sendPresenceUpdate('paused', remoteJid);
-                          const sentMsg = await this.sock.sendMessage(remoteJid, { text: aiReply }, { quoted: msg });
-                          if (sentMsg?.key?.id) {
-                            this.sentMessageIds.add(sentMsg.key.id);
-                            setTimeout(() => this.sentMessageIds.delete(sentMsg.key.id!), 15000);
-                          }
-                          console.log(`[AI] Sent AI response to ${remoteJid}`);
-                        }
-                      }
+                      await this.logChat(remoteJid, 'assistant', aiReply, undefined, 'ai');
+                      console.log(`[AI] Sent AI response to ${remoteJid}`);
                     }
                   } catch (aiErr) {
-                    console.error('[AI] Error in AI fallback:', aiErr);
+                    console.error('[AI] Error generating AI reply:', aiErr);
                   }
-                  // --- End AI Fallback ---
+                } else {
+                  // 2) Legacy keyword auto-reply (only when no active AI agent)
+                  const matchedRule = await AutoReplyService.getResponse(this.userId, textContent, this.sessionId);
+                  if (matchedRule) {
+                    console.log(`[AutoReply] Keyword match: ${matchedRule._id} | ${matchedRule.replyType || 'text'}`);
+                    const isAudio = matchedRule.replyType === 'audio';
+                    const presenceType = isAudio ? 'recording' : 'composing';
+                    await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
+                    await this.sock.sendPresenceUpdate(presenceType, remoteJid);
+                    const humanDelay = isAudio ? 4000 : Math.min(8000, 3000 + (matchedRule.response.length * 50));
+                    await new Promise(r => setTimeout(r, humanDelay));
+                    await this.sock.sendPresenceUpdate('paused', remoteJid);
+
+                    const responseText = matchedRule.response;
+                    try {
+                      let sentMsg;
+                      if (matchedRule.replyType === 'image' && matchedRule.mediaUrl) {
+                        sentMsg = await this.sock.sendMessage(remoteJid, { image: { url: matchedRule.mediaUrl }, caption: responseText }, { quoted: msg });
+                      } else if (matchedRule.replyType === 'video' && matchedRule.mediaUrl) {
+                        sentMsg = await this.sock.sendMessage(remoteJid, { video: { url: matchedRule.mediaUrl }, caption: responseText }, { quoted: msg });
+                      } else if (matchedRule.replyType === 'document' && matchedRule.mediaUrl) {
+                        sentMsg = await this.sock.sendMessage(remoteJid, { document: { url: matchedRule.mediaUrl }, mimetype: 'application/pdf', fileName: matchedRule.fileName || 'file.pdf', caption: responseText }, { quoted: msg });
+                      } else if (matchedRule.replyType === 'audio' && matchedRule.mediaUrl) {
+                        sentMsg = await this.sock.sendMessage(remoteJid, { audio: { url: matchedRule.mediaUrl }, ptt: true }, { quoted: msg });
+                      } else {
+                        sentMsg = await this.sock.sendMessage(remoteJid, { text: responseText }, { quoted: msg });
+                      }
+
+                      if (sentMsg?.key?.id) {
+                        this.sentMessageIds.add(sentMsg.key.id);
+                        sentMessagesCache.set(sentMsg.key.id, sentMsg);
+                        try {
+                          await Message.create({
+                            sessionId: this.sessionId,
+                            remoteJid: remoteJid,
+                            fromMe: true,
+                            id: sentMsg.key.id,
+                            content: JSON.stringify(sentMsg.message, BufferJSON.replacer),
+                            timestamp: Math.floor(Date.now() / 1000)
+                          });
+                        } catch (dbErr) {
+                          console.error('[Engine] Failed to persist auto-reply for retry:', dbErr);
+                        }
+                        setTimeout(() => this.sentMessageIds.delete(sentMsg.key.id!), 15000);
+                      }
+                      await this.logChat(remoteJid, 'assistant', responseText || `[${matchedRule.replyType || 'text'}]`, undefined, 'keyword');
+                      console.log(`[AutoReply] Sent ${matchedRule.replyType || 'text'} response.`);
+                    } catch (sendErr) {
+                      console.error('[AutoReply] Failed to send response:', sendErr);
+                      await this.sock.sendMessage(remoteJid, { text: `[Error sending media] ${responseText}` }, { quoted: msg });
+                    }
+                  }
                 }
               }
             } catch (err) {
@@ -804,6 +768,45 @@ export class WhatsAppEngine {
     } catch (err) {
       console.error(`Failed to validate number ${phone}`, err);
       return false;
+    }
+  }
+
+  // --- AI Agent helpers (per-session config + conversation memory) ---
+
+  private async getSessionAgent(): Promise<any | null> {
+    // Prefer the per-session agent; fall back to a legacy global agent (sessionId=null)
+    let agent = await AIAgent.findOne({ userId: this.userId, sessionId: this.sessionId }).lean();
+    if (!agent) agent = await AIAgent.findOne({ userId: this.userId, sessionId: null }).lean();
+    return agent;
+  }
+
+  private async buildHistory(remoteJid: string, limit = 12): Promise<{ role: 'user' | 'assistant'; text: string }[]> {
+    try {
+      const rows = await ChatLog.find({ sessionId: this.sessionId, remoteJid })
+        .sort({ timestamp: -1 })
+        .limit(limit)
+        .lean();
+      return rows.reverse().map(r => ({ role: (r.role === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant', text: r.text }));
+    } catch (e) {
+      console.error('[Engine] buildHistory failed:', e);
+      return [];
+    }
+  }
+
+  private async logChat(remoteJid: string, role: 'user' | 'assistant', text: string, pushName?: string, source: 'ai' | 'keyword' | 'manual' = 'manual') {
+    try {
+      await ChatLog.create({
+        sessionId: this.sessionId,
+        userId: this.userId,
+        remoteJid,
+        role,
+        text: (text || '').slice(0, 4000),
+        pushName,
+        source,
+        timestamp: Math.floor(Date.now() / 1000)
+      });
+    } catch (e) {
+      console.error('[Engine] logChat failed:', e);
     }
   }
 

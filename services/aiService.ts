@@ -14,7 +14,8 @@ const MODEL_MIGRATIONS: Record<string, string> = {
 
 export async function getAIResponse(
   agent: IAIAgent,
-  userMessage: string
+  userMessage: string,
+  history: { role: 'user' | 'assistant'; text: string }[] = []
 ): Promise<string | null> {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
@@ -56,6 +57,8 @@ export async function getAIResponse(
         model: MODEL_MIGRATIONS[agent.aiModel] || agent.aiModel || 'llama-3.3-70b-versatile',
         messages: [
           { role: 'system', content: systemContent },
+          // Prior turns of THIS conversation give the model full context/memory
+          ...history.filter(h => h.text).map(h => ({ role: h.role, content: h.text })),
           { role: 'user', content: userMessage }
         ],
         temperature: agent.temperature ?? 0.7,

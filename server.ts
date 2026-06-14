@@ -15,6 +15,7 @@ import { SchedulerService } from './services/schedulerService.js';
 import { IUser } from './models/User.js';
 import { ISession } from './models/Session.js';
 import { ISetting } from './models/Setting.js';
+import { ChatLog } from './models/index.js';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -115,6 +116,18 @@ const seedAdmin = async () => {
     }
 };
 
+// Migrate the AI Agent collection to the per-session model.
+// Drops the legacy unique index on userId and builds the {userId, sessionId} index.
+const syncAgentIndexes = async () => {
+    try {
+        const AgentModel: any = storage.getModel('aiagent');
+        await AgentModel.syncIndexes();
+        console.log('--> aiagent indexes synced (per-session).');
+    } catch (e: any) {
+        console.log('--> aiagent index sync note:', e.message);
+    }
+};
+
 const PORT = Number(process.env.PORT || 3050);
 
 // Initialize & Start Server
@@ -129,6 +142,7 @@ const startServer = async () => {
     // 2. Connect to MongoDB (retries internally), then load everything that needs the DB.
     try {
         await storage.init();
+        await syncAgentIndexes();
         await SessionService.loadSessions();
         SchedulerService.init();
         await seedAdmin();
@@ -747,7 +761,8 @@ app.put('/api/autoreply/:id/toggle', authenticateToken, async (req: any, res) =>
 
 app.get('/api/aiagent', authenticateToken, async (req: any, res) => {
     try {
-        const agent = await storage.getItem('aiagent', { userId: req.user.userId });
+        const sessionId = req.query.sessionId || null;
+        const agent = await storage.getItem('aiagent', { userId: req.user.userId, sessionId });
         if (!agent) {
             return res.json(null);
         }
@@ -760,12 +775,14 @@ app.get('/api/aiagent', authenticateToken, async (req: any, res) => {
 
 app.post('/api/aiagent', authenticateToken, async (req: any, res) => {
     try {
-        const { name, role, about, welcomeMessage, systemPrompt, temperature, aiModel, isActive, fallbackToAI, knowledgeBase } = req.body;
+        const { sessionId, name, role, about, welcomeMessage, systemPrompt, temperature, aiModel, isActive, fallbackToAI, knowledgeBase } = req.body;
+        const sid = sessionId || null;
 
-        const existing = await storage.getItem('aiagent', { userId: req.user.userId });
+        const existing = await storage.getItem('aiagent', { userId: req.user.userId, sessionId: sid });
 
         const agentData: any = {
             userId: req.user.userId,
+            sessionId: sid,
             name: name || 'AI Assistant',
             role: role || 'مساعد ذكي',
             about: about || '',
@@ -792,10 +809,11 @@ app.post('/api/aiagent', authenticateToken, async (req: any, res) => {
 
 app.put('/api/aiagent/toggle', authenticateToken, async (req: any, res) => {
     try {
-        const { isActive, fallbackToAI } = req.body;
+        const { sessionId, isActive, fallbackToAI } = req.body;
+        const sid = sessionId || null;
         // Auto-create the agent (with schema defaults) if the user toggles before saving settings.
-        const existing = await storage.getItem('aiagent', { userId: req.user.userId })
-            || { userId: req.user.userId };
+        const existing = await storage.getItem('aiagent', { userId: req.user.userId, sessionId: sid })
+            || { userId: req.user.userId, sessionId: sid };
 
         if (isActive !== undefined) existing.isActive = isActive;
         if (fallbackToAI !== undefined) existing.fallbackToAI = fallbackToAI;
@@ -810,16 +828,17 @@ app.put('/api/aiagent/toggle', authenticateToken, async (req: any, res) => {
 
 app.post('/api/aiagent/knowledge', authenticateToken, async (req: any, res) => {
     try {
-        const { question, answer } = req.body;
+        const { sessionId, question, answer } = req.body;
         if (!question || !answer) return res.status(400).json({ error: 'Missing question or answer' });
+        const sid = sessionId || null;
 
         const { v4: uuidv4 } = await import('uuid');
         const entry = { id: uuidv4(), question, answer };
 
         // Auto-create the agent if it doesn't exist yet, so knowledge can be added
         // even before the user presses "Save settings".
-        const existing = await storage.getItem('aiagent', { userId: req.user.userId })
-            || { userId: req.user.userId, knowledgeBase: [] };
+        const existing = await storage.getItem('aiagent', { userId: req.user.userId, sessionId: sid })
+            || { userId: req.user.userId, sessionId: sid, knowledgeBase: [] };
 
         existing.knowledgeBase = [...(existing.knowledgeBase || []), entry];
         const saved = await storage.saveItem('aiagent', existing);
@@ -832,7 +851,8 @@ app.post('/api/aiagent/knowledge', authenticateToken, async (req: any, res) => {
 
 app.delete('/api/aiagent/knowledge/:entryId', authenticateToken, async (req: any, res) => {
     try {
-        const existing = await storage.getItem('aiagent', { userId: req.user.userId });
+        const sessionId = req.query.sessionId || null;
+        const existing = await storage.getItem('aiagent', { userId: req.user.userId, sessionId });
         if (!existing) return res.status(404).json({ error: 'AI Agent not configured yet' });
 
         existing.knowledgeBase = (existing.knowledgeBase || []).filter((k: any) => k.id !== req.params.entryId);
@@ -842,6 +862,129 @@ app.delete('/api/aiagent/knowledge/:entryId', authenticateToken, async (req: any
     } catch (e: any) {
         console.error('[AI Agent] Knowledge delete error:', e);
         res.status(500).json({ error: e.message });
+    }
+});
+
+// --- Conversation Logs & Analytics (per session) ---
+
+// List conversations (grouped by chat) for a session
+app.get('/api/sessions/:sessionId/conversations', authenticateToken, async (req: any, res) => {
+    const { sessionId } = req.params;
+    const session = SessionService.getSession(sessionId);
+    if (!session || session.userId !== req.user.userId) {
+        return res.status(404).json({ error: 'Session not found or access denied' });
+    }
+    try {
+        const convos = await ChatLog.aggregate([
+            { $match: { sessionId } },
+            { $sort: { timestamp: -1 } },
+            {
+                $group: {
+                    _id: '$remoteJid',
+                    lastText: { $first: '$text' },
+                    lastRole: { $first: '$role' },
+                    lastTime: { $first: '$timestamp' },
+                    pushName: { $max: '$pushName' },
+                    total: { $sum: 1 }
+                }
+            },
+            { $sort: { lastTime: -1 } },
+            { $limit: 200 }
+        ]);
+        res.json(convos.map(c => ({
+            remoteJid: c._id,
+            number: (c._id || '').split('@')[0],
+            pushName: c.pushName,
+            lastText: c.lastText,
+            lastRole: c.lastRole,
+            lastTime: c.lastTime,
+            total: c.total
+        })));
+    } catch (e: any) {
+        console.error('[Conversations] list error:', e);
+        res.status(500).json({ error: 'Failed to fetch conversations' });
+    }
+});
+
+// Get the full thread for one chat
+app.get('/api/sessions/:sessionId/conversations/:jid', authenticateToken, async (req: any, res) => {
+    const { sessionId, jid } = req.params;
+    const session = SessionService.getSession(sessionId);
+    if (!session || session.userId !== req.user.userId) {
+        return res.status(404).json({ error: 'Session not found or access denied' });
+    }
+    try {
+        const remoteJid = decodeURIComponent(jid);
+        const messages = await ChatLog.find({ sessionId, remoteJid })
+            .sort({ timestamp: 1 })
+            .limit(500)
+            .lean();
+        res.json(messages.map((m: any) => ({
+            role: m.role,
+            text: m.text,
+            source: m.source,
+            pushName: m.pushName,
+            timestamp: m.timestamp
+        })));
+    } catch (e: any) {
+        console.error('[Conversations] thread error:', e);
+        res.status(500).json({ error: 'Failed to fetch conversation' });
+    }
+});
+
+// Response analytics for a session
+app.get('/api/sessions/:sessionId/analytics', authenticateToken, async (req: any, res) => {
+    const { sessionId } = req.params;
+    const session = SessionService.getSession(sessionId);
+    if (!session || session.userId !== req.user.userId) {
+        return res.status(404).json({ error: 'Session not found or access denied' });
+    }
+    try {
+        const now = Math.floor(Date.now() / 1000);
+        const since7d = now - 7 * 24 * 3600;
+
+        const totalsAgg = await ChatLog.aggregate([
+            { $match: { sessionId } },
+            {
+                $group: {
+                    _id: null,
+                    totalMessages: { $sum: 1 },
+                    incoming: { $sum: { $cond: [{ $eq: ['$role', 'user'] }, 1, 0] } },
+                    replies: { $sum: { $cond: [{ $eq: ['$role', 'assistant'] }, 1, 0] } },
+                    aiReplies: { $sum: { $cond: [{ $and: [{ $eq: ['$role', 'assistant'] }, { $eq: ['$source', 'ai'] }] }, 1, 0] } },
+                    keywordReplies: { $sum: { $cond: [{ $and: [{ $eq: ['$role', 'assistant'] }, { $eq: ['$source', 'keyword'] }] }, 1, 0] } }
+                }
+            }
+        ]);
+        const t = totalsAgg[0] || { totalMessages: 0, incoming: 0, replies: 0, aiReplies: 0, keywordReplies: 0 };
+
+        const uniqueChats = (await ChatLog.distinct('remoteJid', { sessionId })).length;
+
+        const daily = await ChatLog.aggregate([
+            { $match: { sessionId, timestamp: { $gte: since7d } } },
+            {
+                $group: {
+                    _id: { $dateToString: { format: '%Y-%m-%d', date: { $toDate: { $multiply: ['$timestamp', 1000] } } } },
+                    incoming: { $sum: { $cond: [{ $eq: ['$role', 'user'] }, 1, 0] } },
+                    replies: { $sum: { $cond: [{ $eq: ['$role', 'assistant'] }, 1, 0] } }
+                }
+            },
+            { $sort: { _id: 1 } }
+        ]);
+
+        res.json({
+            totalMessages: t.totalMessages,
+            incoming: t.incoming,
+            replies: t.replies,
+            aiReplies: t.aiReplies,
+            keywordReplies: t.keywordReplies,
+            uniqueChats,
+            responseRate: t.incoming ? Math.round((t.replies / t.incoming) * 100) : 0,
+            daily: daily.map((d: any) => ({ date: d._id, incoming: d.incoming, replies: d.replies }))
+        });
+    } catch (e: any) {
+        console.error('[Analytics] error:', e);
+        res.status(500).json({ error: 'Failed to compute analytics' });
     }
 });
 
