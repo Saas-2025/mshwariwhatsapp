@@ -2,12 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { UserPlus, User, Lock, AlertCircle, Trash2, Edit2, Ban, CheckCircle, X, Shield } from 'lucide-react';
 
 const AVAILABLE_PERMISSIONS = [
-    { id: 'devices', label: 'الأجهزة المتصلة' },
+    { id: 'devices', label: 'الأجهزة (وكل إعداداتها)' },
     { id: 'campaigns', label: 'إرسال الحملات' },
     { id: 'scheduled_campaigns', label: 'جدولة الحملات' },
-    { id: 'aiagent', label: 'AI Agent' },
-    { id: 'conversations', label: 'سجل المحادثات' },
-    { id: 'analytics', label: 'تحليل الردود' },
 ];
 
 const Users = () => {

@@ -8,9 +8,7 @@ import Users from './src/pages/Users';
 import Devices from './src/pages/Devices';
 import Campaigns from './src/pages/Campaigns';
 import ScheduledCampaigns from './src/pages/ScheduledCampaigns';
-import AIAgent from './src/pages/AIAgent';
-import Conversations from './src/pages/Conversations';
-import Analytics from './src/pages/Analytics';
+import SessionDetail from './src/pages/SessionDetail';
 import Settings from './src/pages/Settings';
 import { Menu } from 'lucide-react';
 
@@ -132,11 +130,9 @@ const App = () => {
         <Route element={<DashboardLayout />}>
           <Route path="/" element={<Navigate to="/campaigns" replace />} />
           <Route path="/devices" element={<Devices socket={socket} />} />
+          <Route path="/devices/:sessionId" element={<SessionDetail socket={socket} />} />
           <Route path="/campaigns" element={<Campaigns socket={socket} />} />
           <Route path="/scheduled-campaigns" element={<ScheduledCampaigns />} />
-          <Route path="/aiagent" element={<AIAgent />} />
-          <Route path="/conversations" element={<Conversations />} />
-          <Route path="/analytics" element={<Analytics />} />
           <Route path="/users" element={<Users />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
