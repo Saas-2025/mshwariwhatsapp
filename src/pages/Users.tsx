@@ -14,11 +14,12 @@ interface FormShape {
     role: 'admin' | 'user';
     permissions: string[];
     maxSessions: number;
+    planId?: string;
     isActive?: boolean;
 }
 
 // Shared role + permissions + limit controls (top-level so inputs keep focus on re-render)
-const RoleControls = ({ form, setForm }: { form: FormShape; setForm: (f: FormShape) => void }) => (
+const RoleControls = ({ form, setForm, plans }: { form: FormShape; setForm: (f: FormShape) => void; plans: any[] }) => (
     <>
         <div>
             <label className="block text-sm font-medium text-slate-500 mb-2">نوع الحساب</label>
@@ -40,7 +41,21 @@ const RoleControls = ({ form, setForm }: { form: FormShape; setForm: (f: FormSha
         {form.role === 'user' && (
             <>
                 <div>
-                    <label className="block text-sm font-medium text-slate-500 mb-1">الحد الأقصى للأجهزة (0 = بلا حد)</label>
+                    <label className="block text-sm font-medium text-slate-500 mb-1">الباقة المشترك بها</label>
+                    <select value={form.planId || ''}
+                        onChange={e => setForm({ ...form, planId: e.target.value })}
+                        className="w-full max-w-xs bg-slate-50 border border-slate-200 p-3 rounded-xl focus:outline-none focus:border-emerald-500">
+                        <option value="">بدون باقة</option>
+                        {plans.map(p => (
+                            <option key={p._id} value={p._id}>
+                                {p.name}{p.priceMonthly > 0 ? ` — ${Number(p.priceMonthly).toLocaleString('en-US')} ${p.currency}/شهر` : ' — مجانية'}
+                            </option>
+                        ))}
+                    </select>
+                    <p className="text-xs text-slate-400 mt-1">الباقة تحدد حد الأجهزة والمحادثات والحملات تلقائياً.</p>
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-slate-500 mb-1">الحد الأقصى للأجهزة (يدوي — يُستخدم إن لم تُحدد باقة)</label>
                     <input type="number" min="0" value={form.maxSessions}
                         onChange={e => setForm({ ...form, maxSessions: Math.max(0, parseInt(e.target.value) || 0) })}
                         className="w-40 bg-slate-50 border border-slate-200 p-3 rounded-xl focus:outline-none focus:border-emerald-500" />
@@ -65,10 +80,11 @@ const RoleControls = ({ form, setForm }: { form: FormShape; setForm: (f: FormSha
 
 const Users = () => {
     const [users, setUsers] = useState<any[]>([]);
+    const [plans, setPlans] = useState<any[]>([]);
 
-    const [createForm, setCreateForm] = useState<FormShape>({ name: '', username: '', password: '', role: 'user', permissions: [], maxSessions: 0 });
+    const [createForm, setCreateForm] = useState<FormShape>({ name: '', username: '', password: '', role: 'user', permissions: [], maxSessions: 0, planId: '' });
     const [editingUser, setEditingUser] = useState<any | null>(null);
-    const [editForm, setEditForm] = useState<FormShape>({ name: '', username: '', password: '', role: 'user', isActive: true, permissions: [], maxSessions: 0 });
+    const [editForm, setEditForm] = useState<FormShape>({ name: '', username: '', password: '', role: 'user', isActive: true, permissions: [], maxSessions: 0, planId: '' });
 
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
@@ -81,7 +97,7 @@ const Users = () => {
         (!search || (u.name || '').toLowerCase().includes(search.toLowerCase()) || (u.username || '').toLowerCase().includes(search.toLowerCase()))
     );
 
-    useEffect(() => { fetchUsers(); }, []);
+    useEffect(() => { fetchUsers(); fetchPlans(); }, []);
 
     const getApiUrl = () => {
         let url = import.meta.env.VITE_API_URL || 'http://localhost:3050';
@@ -97,6 +113,15 @@ const Users = () => {
         } catch (err) { console.error(err); }
     };
 
+    const fetchPlans = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`${getApiUrl()}/api/plans`, { headers: { Authorization: `Bearer ${token}` } });
+            if (res.ok) setPlans(await res.json());
+        } catch (err) { console.error(err); }
+    };
+    const planName = (id: string) => plans.find(p => p._id === id)?.name || '';
+
     const handleCreateUser = async (e: React.FormEvent) => {
         e.preventDefault();
         setError(''); setSuccess(''); setLoading(true);
@@ -110,7 +135,7 @@ const Users = () => {
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || 'Failed to create user');
             setSuccess('تم إنشاء المستخدم بنجاح');
-            setCreateForm({ name: '', username: '', password: '', role: 'user', permissions: [], maxSessions: 0 });
+            setCreateForm({ name: '', username: '', password: '', role: 'user', permissions: [], maxSessions: 0, planId: '' });
             fetchUsers();
         } catch (err: any) { setError(err.message); } finally { setLoading(false); }
     };
@@ -125,6 +150,7 @@ const Users = () => {
             isActive: user.isActive,
             permissions: user.permissions || [],
             maxSessions: user.maxSessions || 0,
+            planId: user.planId || '',
         });
         setError(''); setSuccess('');
     };
@@ -189,7 +215,7 @@ const Users = () => {
                         <input type="text" placeholder="اسم المستخدم" value={createForm.username} onChange={e => setCreateForm({ ...createForm, username: e.target.value })} className="bg-slate-50 border border-slate-200 p-3 rounded-xl" required />
                         <input type="password" placeholder="كلمة المرور" value={createForm.password} onChange={e => setCreateForm({ ...createForm, password: e.target.value })} className="bg-slate-50 border border-slate-200 p-3 rounded-xl" required />
                     </div>
-                    <RoleControls form={createForm} setForm={setCreateForm} />
+                    <RoleControls form={createForm} setForm={setCreateForm} plans={plans} />
                     <div className="flex justify-end">
                         <button type="submit" disabled={loading} className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-8 rounded-xl transition-all disabled:opacity-50">
                             {loading ? 'جاري الإضافة...' : 'إضافة المستخدم'}
@@ -223,6 +249,7 @@ const Users = () => {
                                 <th className="p-4">اسم المستخدم</th>
                                 <th className="p-4">الحالة</th>
                                 <th className="p-4">النوع</th>
+                                <th className="p-4">الباقة</th>
                                 <th className="p-4">حد الأجهزة</th>
                                 <th className="p-4">المحادثات</th>
                                 <th className="p-4">الرسائل</th>
@@ -243,6 +270,9 @@ const Users = () => {
                                     <td className="p-4">
                                         <span className={`px-2 py-1 rounded text-xs font-bold ${user.role === 'admin' ? 'bg-purple-100 text-purple-600' : 'bg-slate-100 text-slate-600'}`}>{user.role === 'admin' ? 'أدمن' : 'مستخدم'}</span>
                                     </td>
+                                    <td className="p-4">
+                                        {user.role === 'admin' ? <span className="text-slate-400 text-xs">—</span> : (planName(user.planId) ? <span className="px-2 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">{planName(user.planId)}</span> : <span className="text-slate-400 text-xs">بدون باقة</span>)}
+                                    </td>
                                     <td className="p-4 text-sm">{user.role === 'admin' ? '∞' : (user.maxSessions ? user.maxSessions : 'بلا حد')}</td>
                                     <td className="p-4">
                                         <span className="inline-flex items-center gap-1 text-sm text-slate-600"><MessageSquare size={14} className="text-emerald-500" /> {user.conversationCount ?? 0}</span>
@@ -257,7 +287,7 @@ const Users = () => {
                                     </td>
                                 </tr>
                             ))}
-                            {filteredUsers.length === 0 && <tr><td colSpan={8} className="p-8 text-center text-slate-400">لا يوجد مستخدمين مطابقين</td></tr>}
+                            {filteredUsers.length === 0 && <tr><td colSpan={9} className="p-8 text-center text-slate-400">لا يوجد مستخدمين مطابقين</td></tr>}
                         </tbody>
                     </table>
                 </div>
@@ -285,7 +315,7 @@ const Users = () => {
                                 <input type="password" value={editForm.password} onChange={e => setEditForm({ ...editForm, password: e.target.value })} className="w-full border border-slate-200 bg-slate-50 p-2.5 rounded-xl" placeholder="اتركها فارغة للإبقاء على القديمة" />
                             </div>
 
-                            <RoleControls form={editForm} setForm={setEditForm} />
+                            <RoleControls form={editForm} setForm={setEditForm} plans={plans} />
 
                             <div className="flex items-center gap-2 mt-2">
                                 <input type="checkbox" checked={editForm.isActive} onChange={e => setEditForm({ ...editForm, isActive: e.target.checked })} className="w-5 h-5 accent-emerald-500" />

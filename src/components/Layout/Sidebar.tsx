@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { Send, Users, Settings, LogOut, Smartphone, X, Calendar, ChevronRight, Globe, LayoutDashboard } from 'lucide-react';
+import { Send, Users, Settings, LogOut, Smartphone, X, Calendar, ChevronRight, Globe, LayoutDashboard, CreditCard } from 'lucide-react';
 import { useLang } from '../../i18n';
 
 interface SidebarProps {
@@ -35,6 +35,9 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout, isOpen, onClose, systemName
 
     // Home/dashboard is always visible (no permission gate)
     links.unshift({ to: '/', icon: <LayoutDashboard size={20} />, label: t('dashboard') });
+
+    // Subscriptions — visible to everyone
+    links.push({ to: '/subscriptions', icon: <CreditCard size={20} />, label: t('subscriptions') });
 
     if (isAdmin) {
         links.push({ to: '/users', icon: <Users size={20} />, label: t('users') });

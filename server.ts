@@ -130,6 +130,21 @@ const syncAgentIndexes = async () => {
     }
 };
 
+// Seed default subscription plans on first run
+const seedPlans = async () => {
+    try {
+        const existing = await storage.getItems('plans');
+        if (existing.length > 0) return;
+        const defaults = [
+            { name: 'مجانية', priceMonthly: 0, priceYearly: 0, currency: 'ج.م', maxSessions: 1, maxConversations: 100, maxCampaignMessages: 200, maxScheduled: 1, features: ['جهاز واحد', 'رد آلي بالذكاء الاصطناعي', 'قواعد معرفة أساسية'], popular: false, order: 1, isActive: true },
+            { name: 'احترافية', priceMonthly: 299, priceYearly: 2990, currency: 'ج.م', maxSessions: 3, maxConversations: 2000, maxCampaignMessages: 10000, maxScheduled: 10, features: ['3 أجهزة', 'كل مميزات الذكاء الاصطناعي', 'تكامل فيسبوك', 'تحليلات متقدمة', 'دعم أولوية'], popular: true, order: 2, isActive: true },
+            { name: 'أعمال', priceMonthly: 799, priceYearly: 7990, currency: 'ج.م', maxSessions: 10, maxConversations: 0, maxCampaignMessages: 0, maxScheduled: 0, features: ['10 أجهزة', 'محادثات وحملات بلا حدود', 'API للموقع الإلكتروني', 'مستخدمون متعددون', 'دعم مخصص'], popular: false, order: 3, isActive: true }
+        ];
+        for (const p of defaults) await storage.saveItem('plans', p);
+        console.log('--> Seeded default subscription plans.');
+    } catch (e: any) { console.log('--> seedPlans note:', e.message); }
+};
+
 const PORT = Number(process.env.PORT || 3050);
 
 // Initialize & Start Server
@@ -148,6 +163,7 @@ const startServer = async () => {
         await SessionService.loadSessions();
         SchedulerService.init();
         await seedAdmin();
+        await seedPlans();
         console.log('✅ Startup complete (DB connected, sessions loaded).');
     } catch (err) {
         console.error('⚠️  Background startup error (server still listening):', err);
@@ -318,7 +334,7 @@ app.get('/api/users', authenticateToken, requireAdmin, async (req: any, res) => 
 app.put('/api/users/:id', authenticateToken, requireAdmin, async (req: any, res) => {
     try {
         const { id } = req.params;
-        const { name, username, password, isActive, permissions, role, maxSessions } = req.body;
+        const { name, username, password, isActive, permissions, role, maxSessions, planId } = req.body;
 
         // Prevent suspending Admin
         const targetUser = await storage.getItem('users', { _id: id });
@@ -339,6 +355,7 @@ app.put('/api/users/:id', authenticateToken, requireAdmin, async (req: any, res)
             if (permissions) updateData.permissions = permissions;
             if (maxSessions !== undefined) updateData.maxSessions = Math.max(0, Number(maxSessions) || 0);
         }
+        if (planId !== undefined) updateData.planId = planId;
 
         if (password && password.trim() !== '') {
             updateData.password = await bcrypt.hash(password, 10);
@@ -1628,6 +1645,11 @@ app.get('/api/dashboard', authenticateToken, async (req: any, res) => {
             if (agent && (agent.groqKeys || []).length) hasGroq = true;
         }
 
+        // Current subscription plan (for the logged-in user)
+        let plan: any = null;
+        const me = await storage.getItem('users', { _id: req.user.userId });
+        if (me?.planId) plan = await storage.getItem('plans', { _id: me.planId });
+
         res.json({
             devices: sessions.length,
             connected,
@@ -1639,12 +1661,52 @@ app.get('/api/dashboard', authenticateToken, async (req: any, res) => {
             today: t.today,
             daily: daily.map((d: any) => ({ date: d._id, incoming: d.incoming, replies: d.replies })),
             replyBreakdown: { ai: t.aiReplies, keyword: t.keywordReplies, manual: t.manualReplies },
-            onboarding: { hasDevice: sessions.length > 0, hasConnected: connected > 0, hasAgent, hasGroq, hasKnowledge }
+            onboarding: { hasDevice: sessions.length > 0, hasConnected: connected > 0, hasAgent, hasGroq, hasKnowledge },
+            plan: plan ? { name: plan.name, priceMonthly: plan.priceMonthly, currency: plan.currency, maxSessions: plan.maxSessions, maxConversations: plan.maxConversations, maxCampaignMessages: plan.maxCampaignMessages, maxScheduled: plan.maxScheduled, features: plan.features } : null,
+            usage: { devices: sessions.length, conversations: uniqueChats, messages: t.messages }
         });
     } catch (e: any) {
         console.error('[Dashboard] error:', e);
         res.status(500).json({ error: e.message });
     }
+});
+
+// Current logged-in user (safe fields) — used by the subscriptions page
+app.get('/api/me', authenticateToken, async (req: any, res) => {
+    try {
+        const me = await storage.getItem('users', { _id: req.user.userId });
+        if (!me) return res.status(404).json({ error: 'Not found' });
+        delete me.password;
+        res.json(me);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// --- Subscription Plans ---
+app.get('/api/plans', authenticateToken, async (req: any, res) => {
+    try {
+        const all = await storage.getItems('plans');
+        res.json(all.filter((p: any) => p.isActive !== false).sort((a: any, b: any) => (a.order || 0) - (b.order || 0)));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/plans/all', authenticateToken, requireAdmin, async (req: any, res) => {
+    const all = await storage.getItems('plans');
+    res.json(all.sort((a: any, b: any) => (a.order || 0) - (b.order || 0)));
+});
+
+app.post('/api/plans', authenticateToken, requireAdmin, async (req: any, res) => {
+    try { res.json(await storage.saveItem('plans', { ...req.body })); }
+    catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/plans/:id', authenticateToken, requireAdmin, async (req: any, res) => {
+    try { res.json(await storage.saveItem('plans', { ...req.body, _id: req.params.id })); }
+    catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/plans/:id', authenticateToken, requireAdmin, async (req: any, res) => {
+    try { await storage.deleteItem('plans', { _id: req.params.id }); res.json({ success: true }); }
+    catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // ============================================================
@@ -1967,9 +2029,13 @@ io.on('connection', (socket) => {
         try {
             if (!isAdmin) {
                 const me = await storage.getItem('users', { _id: userId });
-                const limit = Number(me?.maxSessions) || 0;
+                let limit = Number(me?.maxSessions) || 0;
+                if (me?.planId) {
+                    const plan = await storage.getItem('plans', { _id: me.planId });
+                    if (plan) limit = Number(plan.maxSessions) || 0;
+                }
                 if (limit > 0 && SessionService.getUserSessions(userId).length >= limit) {
-                    const msg = `وصلت للحد الأقصى من الأجهزة (${limit}). تواصل مع المسؤول لزيادة الحد.`;
+                    const msg = `وصلت للحد الأقصى من الأجهزة في باقتك (${limit}). قم بترقية الباقة لإضافة المزيد.`;
                     if (typeof callback === 'function') callback({ error: msg });
                     return;
                 }

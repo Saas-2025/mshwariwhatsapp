@@ -11,6 +11,7 @@ import ScheduledCampaigns from './src/pages/ScheduledCampaigns';
 import SessionDetail from './src/pages/SessionDetail';
 import Dashboard from './src/pages/Dashboard';
 import Settings from './src/pages/Settings';
+import Subscriptions from './src/pages/Subscriptions';
 import { Menu } from 'lucide-react';
 import { useLang } from './src/i18n';
 
@@ -155,6 +156,7 @@ const App = () => {
           <Route path="/devices/:sessionId" element={<SessionDetail socket={socket} />} />
           <Route path="/campaigns" element={<Campaigns socket={socket} />} />
           <Route path="/scheduled-campaigns" element={<ScheduledCampaigns />} />
+          <Route path="/subscriptions" element={<Subscriptions />} />
           <Route path="/users" element={<Users />} />
           <Route path="/settings" element={<Settings />} />
         </Route>

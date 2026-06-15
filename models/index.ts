@@ -11,3 +11,4 @@ export * from './AIAgent.js';
 export * from './ChatLog.js';
 export * from './FacebookConnection.js';
 export * from './ChatSettings.js';
+export * from './Plan.js';

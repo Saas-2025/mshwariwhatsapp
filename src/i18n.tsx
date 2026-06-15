@@ -8,6 +8,7 @@ const dict: Record<string, { ar: string; en: string }> = {
   devices: { ar: 'الأجهزة المتصلة', en: 'Devices' },
   campaigns: { ar: 'إرسال الحملات', en: 'Campaigns' },
   scheduled: { ar: 'جدولة الحملات', en: 'Scheduled' },
+  subscriptions: { ar: 'الاشتراكات', en: 'Subscriptions' },
   users: { ar: 'المستخدمين', en: 'Users' },
   settings: { ar: 'الإعدادات', en: 'Settings' },
   logout: { ar: 'تسجيل الخروج', en: 'Log out' },
