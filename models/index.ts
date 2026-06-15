@@ -14,3 +14,4 @@ export * from './ChatSettings.js';
 export * from './Plan.js';
 export * from './SupportTicket.js';
 export * from './Campaign.js';
+export * from './CustomerCategory.js';

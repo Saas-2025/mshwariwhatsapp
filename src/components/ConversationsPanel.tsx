@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   MessageSquare, User, Bot, RefreshCw, Search, ChevronRight, Send, Paperclip,
-  Trash2, Sliders, Phone, Ban, Save
+  Trash2, Sliders, Phone, Ban, Save, Tags
 } from 'lucide-react';
+import { catColor, Category } from '../lib/categories';
 
-interface Convo { remoteJid: string; number: string; pushName?: string; lastText: string; lastRole: string; lastTime: number; total: number; }
+interface Convo { remoteJid: string; number: string; pushName?: string; lastText: string; lastRole: string; lastTime: number; total: number; categoryId?: string; }
 interface ChatMsg { role: 'user' | 'assistant'; text: string; source?: string; pushName?: string; timestamp: number; }
-interface ChatCfg { aiDisabled: boolean; customPrompt: string; }
+interface ChatCfg { aiDisabled: boolean; customPrompt: string; categoryId?: string; }
 
 const baseUrl = () => (import.meta.env.VITE_API_URL || 'http://localhost:3050').replace(/\/$/, '');
 const authH = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
@@ -25,9 +26,11 @@ const ConversationsPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
   const [search, setSearch] = useState('');
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
-  const [cfg, setCfg] = useState<ChatCfg>({ aiDisabled: false, customPrompt: '' });
+  const [cfg, setCfg] = useState<ChatCfg>({ aiDisabled: false, customPrompt: '', categoryId: '' });
   const [showSettings, setShowSettings] = useState(false);
   const [promptDraft, setPromptDraft] = useState('');
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [catFilter, setCatFilter] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -39,7 +42,15 @@ const ConversationsPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
     } catch { /* ignore */ }
   };
 
-  useEffect(() => { setConvos([]); setActiveJid(null); setThread([]); loadConvos(); }, [sessionId]);
+  const loadCategories = async () => {
+    if (!sessionId) return;
+    try {
+      const res = await fetch(`${baseUrl()}/api/sessions/${sessionId}/categories`, { headers: authH() });
+      if (res.ok) setCategories(await res.json());
+    } catch { /* ignore */ }
+  };
+
+  useEffect(() => { setConvos([]); setActiveJid(null); setThread([]); setCatFilter(''); loadConvos(); loadCategories(); }, [sessionId]);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [thread]);
 
   const openThread = async (jid: string) => {
@@ -102,6 +113,14 @@ const ConversationsPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
     setShowSettings(false);
   };
 
+  const setCategory = async (categoryId: string) => {
+    setCfg(c => ({ ...c, categoryId }));
+    setConvos(prev => prev.map(c => c.remoteJid === activeJid ? { ...c, categoryId } : c));
+    await fetch(`${baseUrl()}/api/sessions/${sessionId}/chat-settings/${encodeURIComponent(activeJid!)}`, {
+      method: 'PUT', headers: jsonH(), body: JSON.stringify({ categoryId })
+    }).catch(() => { });
+  };
+
   const deleteConvo = async (jid: string) => {
     if (!confirm('حذف هذه المحادثة نهائياً من السجل؟')) return;
     await fetch(`${baseUrl()}/api/sessions/${sessionId}/conversations/${encodeURIComponent(jid)}`, { method: 'DELETE', headers: authH() });
@@ -109,10 +128,13 @@ const ConversationsPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
     loadConvos();
   };
 
-  const filtered = convos.filter(c => !search ||
-    (c.pushName || '').toLowerCase().includes(search.toLowerCase()) ||
-    (c.number || '').includes(search) ||
-    (c.lastText || '').toLowerCase().includes(search.toLowerCase()));
+  const catById = (id?: string) => categories.find(c => c._id === id);
+  const filtered = convos.filter(c =>
+    (!catFilter || c.categoryId === catFilter) &&
+    (!search ||
+      (c.pushName || '').toLowerCase().includes(search.toLowerCase()) ||
+      (c.number || '').includes(search) ||
+      (c.lastText || '').toLowerCase().includes(search.toLowerCase())));
 
   const active = convos.find(c => c.remoteJid === activeJid);
   const activeNumber = active?.number || (activeJid ? activeJid.split('@')[0].replace('fb:', 'FB:') : '');
@@ -127,10 +149,19 @@ const ConversationsPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-[64vh]">
         {/* Chat List */}
         <div className={`bg-white rounded-2xl border border-slate-200 shadow-sm flex-col overflow-hidden ${activeJid ? 'hidden md:flex' : 'flex'}`}>
-          <div className="p-3 border-b border-slate-100 relative">
-            <Search size={16} className="absolute right-6 top-6 text-slate-400" />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="بحث بالاسم أو الرقم..."
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 pr-10 pl-3 text-sm focus:outline-none focus:border-emerald-500" />
+          <div className="p-3 border-b border-slate-100 space-y-2">
+            <div className="relative">
+              <Search size={16} className="absolute right-3 top-3 text-slate-400" />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="بحث بالاسم أو الرقم..."
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 pr-10 pl-3 text-sm focus:outline-none focus:border-emerald-500" />
+            </div>
+            {categories.length > 0 && (
+              <select value={catFilter} onChange={e => setCatFilter(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-bold text-slate-600 focus:outline-none focus:border-emerald-500">
+                <option value="">كل الفئات</option>
+                {categories.map(c => <option key={c._id} value={c._id}>{c.name}</option>)}
+              </select>
+            )}
           </div>
           <div className="flex-1 overflow-y-auto custom-scrollbar">
             {filtered.length === 0 && <div className="text-center text-slate-400 py-12 text-sm">لا توجد محادثات.</div>}
@@ -143,11 +174,17 @@ const ConversationsPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-center gap-2">
-                    <span className="font-bold text-slate-700 text-sm truncate">{c.pushName || c.number}</span>
+                    <span className="font-bold text-slate-700 text-sm truncate flex items-center gap-1.5">
+                      {c.categoryId && catById(c.categoryId) && <span className={`w-2 h-2 rounded-full shrink-0 ${catColor(catById(c.categoryId)!.color).dot}`} />}
+                      {c.pushName || c.number}
+                    </span>
                     <span className="text-[10px] text-slate-400 shrink-0">{fmtTime(c.lastTime)}</span>
                   </div>
                   <p className="text-[11px] text-slate-400 font-mono truncate" dir="ltr">{c.number}</p>
-                  <p className="text-xs text-slate-400 truncate">{c.lastRole === 'assistant' ? '🤖 ' : ''}{c.lastText}</p>
+                  <div className="flex items-center gap-1.5">
+                    {c.categoryId && catById(c.categoryId) && <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${catColor(catById(c.categoryId)!.color).chip}`}>{catById(c.categoryId)!.name}</span>}
+                    <p className="text-xs text-slate-400 truncate">{c.lastRole === 'assistant' ? '🤖 ' : ''}{c.lastText}</p>
+                  </div>
                 </div>
                 <button onClick={(e) => { e.stopPropagation(); deleteConvo(c.remoteJid); }}
                   className="text-slate-300 hover:text-red-500 p-1.5 rounded-full hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all shrink-0" title="حذف المحادثة">
@@ -180,6 +217,14 @@ const ConversationsPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
                   className={`p-2 rounded-lg ${cfg.aiDisabled ? 'bg-red-50 text-red-500' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}>
                   {cfg.aiDisabled ? <Ban size={18} /> : <Bot size={18} />}
                 </button>
+                <div className="relative flex items-center" title="فئة العميل">
+                  <Tags size={15} className="absolute right-2 text-slate-400 pointer-events-none" />
+                  <select value={cfg.categoryId || ''} onChange={e => setCategory(e.target.value)}
+                    className={`text-xs font-bold border rounded-lg pr-7 pl-2 py-2 max-w-[130px] focus:outline-none focus:border-emerald-500 ${cfg.categoryId ? catColor(catById(cfg.categoryId)?.color).chip + ' border-transparent' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                    <option value="">بدون فئة</option>
+                    {categories.map(c => <option key={c._id} value={c._id}>{c.name}</option>)}
+                  </select>
+                </div>
                 <button onClick={() => setShowSettings(s => !s)} title="معاملة خاصة لهذا العميل"
                   className={`p-2 rounded-lg ${cfg.customPrompt ? 'bg-emerald-50 text-emerald-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}>
                   <Sliders size={18} />

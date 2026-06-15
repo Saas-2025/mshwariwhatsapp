@@ -1320,6 +1320,10 @@ app.get('/api/sessions/:sessionId/conversations', authenticateToken, async (req:
             { $sort: { lastTime: -1 } },
             { $limit: 200 }
         ]);
+        // Attach each chat's category (from chat_settings)
+        const cats = await storage.getItems('chat_settings', { sessionId });
+        const catByJid: Record<string, string> = {};
+        cats.forEach((s: any) => { if (s.categoryId) catByJid[s.remoteJid] = s.categoryId; });
         res.json(convos.map(c => ({
             remoteJid: c._id,
             number: (c._id || '').split('@')[0],
@@ -1327,7 +1331,8 @@ app.get('/api/sessions/:sessionId/conversations', authenticateToken, async (req:
             lastText: c.lastText,
             lastRole: c.lastRole,
             lastTime: c.lastTime,
-            total: c.total
+            total: c.total,
+            categoryId: catByJid[c._id] || ''
         })));
     } catch (e: any) {
         console.error('[Conversations] list error:', e);
@@ -1370,7 +1375,7 @@ app.get('/api/sessions/:sessionId/chat-settings/:jid', authenticateToken, async 
     }
     const remoteJid = decodeURIComponent(jid);
     const cfg = await storage.getItem('chat_settings', { sessionId, remoteJid });
-    res.json({ aiDisabled: !!(cfg && cfg.aiDisabled), customPrompt: (cfg && cfg.customPrompt) || '' });
+    res.json({ aiDisabled: !!(cfg && cfg.aiDisabled), customPrompt: (cfg && cfg.customPrompt) || '', categoryId: (cfg && cfg.categoryId) || '' });
 });
 
 app.put('/api/sessions/:sessionId/chat-settings/:jid', authenticateToken, async (req: any, res) => {
@@ -1381,15 +1386,87 @@ app.put('/api/sessions/:sessionId/chat-settings/:jid', authenticateToken, async 
     }
     try {
         const remoteJid = decodeURIComponent(jid);
-        const { aiDisabled, customPrompt } = req.body;
+        const { aiDisabled, customPrompt, categoryId } = req.body;
         const existing: any = await storage.getItem('chat_settings', { sessionId, remoteJid }) || { sessionId, remoteJid };
         if (aiDisabled !== undefined) existing.aiDisabled = !!aiDisabled;
         if (customPrompt !== undefined) existing.customPrompt = String(customPrompt).slice(0, 4000);
+        if (categoryId !== undefined) existing.categoryId = String(categoryId || '');
         await storage.saveItem('chat_settings', existing);
-        res.json({ success: true, aiDisabled: !!existing.aiDisabled, customPrompt: existing.customPrompt || '' });
+        res.json({ success: true, aiDisabled: !!existing.aiDisabled, customPrompt: existing.customPrompt || '', categoryId: existing.categoryId || '' });
     } catch (e: any) {
         res.status(500).json({ error: e.message });
     }
+});
+
+// --- Customer categories (per session) ---
+const ensureSessionAccess = (req: any) => {
+    const session = SessionService.getSession(req.params.sessionId);
+    if (!session || (session.userId !== req.user.userId && req.user.role !== 'admin')) return null;
+    return session;
+};
+
+app.get('/api/sessions/:sessionId/categories', authenticateToken, async (req: any, res) => {
+    const session = ensureSessionAccess(req);
+    if (!session) return res.status(404).json({ error: 'Session not found or access denied' });
+    const cats = await storage.getItems('categories', { sessionId: req.params.sessionId });
+    res.json(cats.sort((a: any, b: any) => (a.order || 0) - (b.order || 0)));
+});
+
+app.post('/api/sessions/:sessionId/categories', authenticateToken, async (req: any, res) => {
+    const session = ensureSessionAccess(req);
+    if (!session) return res.status(404).json({ error: 'Session not found or access denied' });
+    const { name, color, order } = req.body;
+    if (!name) return res.status(400).json({ error: 'اسم الفئة مطلوب' });
+    const saved = await storage.saveItem('categories', { sessionId: req.params.sessionId, userId: session.userId, name: String(name).slice(0, 60), color: color || 'emerald', order: Number(order) || 0 });
+    res.json(saved);
+});
+
+app.put('/api/sessions/:sessionId/categories/:id', authenticateToken, async (req: any, res) => {
+    const session = ensureSessionAccess(req);
+    if (!session) return res.status(404).json({ error: 'Session not found or access denied' });
+    const cat = await storage.getItem('categories', { _id: req.params.id });
+    if (!cat || cat.sessionId !== req.params.sessionId) return res.status(404).json({ error: 'Category not found' });
+    const { name, color, order } = req.body;
+    const upd: any = { ...cat };
+    if (name !== undefined) upd.name = String(name).slice(0, 60);
+    if (color !== undefined) upd.color = color;
+    if (order !== undefined) upd.order = Number(order) || 0;
+    delete upd.createdAt; delete upd.updatedAt;
+    res.json(await storage.saveItem('categories', upd));
+});
+
+app.delete('/api/sessions/:sessionId/categories/:id', authenticateToken, async (req: any, res) => {
+    const session = ensureSessionAccess(req);
+    if (!session) return res.status(404).json({ error: 'Session not found or access denied' });
+    await storage.deleteItem('categories', { _id: req.params.id });
+    // Untag any chats that referenced this category
+    const tagged = await storage.getItems('chat_settings', { sessionId: req.params.sessionId, categoryId: req.params.id });
+    for (const s of tagged) { const u: any = { ...s, categoryId: '' }; delete u.createdAt; delete u.updatedAt; await storage.saveItem('chat_settings', u); }
+    res.json({ success: true });
+});
+
+// Recipients for campaign building: all conversation contacts + their category
+app.get('/api/sessions/:sessionId/recipients', authenticateToken, async (req: any, res) => {
+    const session = ensureSessionAccess(req);
+    if (!session) return res.status(404).json({ error: 'Session not found or access denied' });
+    try {
+        const sessionId = req.params.sessionId;
+        const rows = await ChatLog.aggregate([
+            { $match: { sessionId } },
+            { $sort: { timestamp: -1 } },
+            { $group: { _id: '$remoteJid', pushName: { $max: '$pushName' }, lastTime: { $first: '$timestamp' } } },
+            { $sort: { lastTime: -1 } },
+            { $limit: 5000 }
+        ]);
+        const cats = await storage.getItems('chat_settings', { sessionId });
+        const catByJid: Record<string, string> = {};
+        cats.forEach((s: any) => { if (s.categoryId) catByJid[s.remoteJid] = s.categoryId; });
+        const out = rows
+            .filter((r: any) => r._id && (r._id.includes('@s.whatsapp.net') || r._id.includes('@lid')))
+            .map((r: any) => ({ remoteJid: r._id, number: (r._id || '').split('@')[0].replace(/\D/g, ''), name: r.pushName || '', categoryId: catByJid[r._id] || '' }))
+            .filter((r: any) => r.number.length >= 8);
+        res.json(out);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // Delete a whole conversation from the dashboard

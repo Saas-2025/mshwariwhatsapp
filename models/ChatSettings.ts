@@ -10,6 +10,7 @@ export interface IChatSettings extends Document {
     remoteJid: string;
     aiDisabled: boolean;
     customPrompt: string;
+    categoryId?: string;   // customer segment/category for this chat
     createdAt?: string;
     updatedAt?: string;
 }
@@ -18,7 +19,8 @@ const ChatSettingsSchema = new Schema<IChatSettings>({
     sessionId: { type: String, required: true },
     remoteJid: { type: String, required: true },
     aiDisabled: { type: Boolean, default: false },
-    customPrompt: { type: String, default: '' }
+    customPrompt: { type: String, default: '' },
+    categoryId: { type: String, default: '' }
 }, { timestamps: true });
 
 ChatSettingsSchema.index({ sessionId: 1, remoteJid: 1 }, { unique: true });
