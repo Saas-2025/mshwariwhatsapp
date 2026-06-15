@@ -4,7 +4,7 @@
  * This engine is designed to work in a Node.js environment with Baileys and File Storage.
  */
 
-import { makeWASocket, DisconnectReason, BufferJSON, AuthenticationCreds, fetchLatestBaileysVersion, Browsers } from '@whiskeysockets/baileys';
+import { makeWASocket, DisconnectReason, BufferJSON, AuthenticationCreds, fetchLatestBaileysVersion, Browsers, downloadMediaMessage } from '@whiskeysockets/baileys';
 import P from 'pino';
 import fs from 'fs/promises';
 import path from 'path';
@@ -45,6 +45,24 @@ const transcodeToOggOpus = (input: Buffer): Promise<Buffer> => new Promise((reso
   ff.on('close', (code: number) => (code === 0 && out.length)
     ? resolve(Buffer.concat(out))
     : reject(new Error('ffmpeg failed: ' + Buffer.concat(errs).toString().slice(-200))));
+  ff.stdin.on('error', () => { /* ignore EPIPE */ });
+  ff.stdin.write(input);
+  ff.stdin.end();
+});
+
+// Convert any audio to 16kHz mono WAV — the friendliest input for speech-to-text.
+const transcodeToWav = (input: Buffer): Promise<Buffer> => new Promise((resolve, reject) => {
+  const bin = ffmpegStatic as unknown as (string | null);
+  if (!bin) return reject(new Error('ffmpeg not available'));
+  const ff = spawn(bin, ['-i', 'pipe:0', '-ar', '16000', '-ac', '1', '-f', 'wav', 'pipe:1']);
+  const out: Buffer[] = [];
+  const errs: Buffer[] = [];
+  ff.stdout.on('data', (d: Buffer) => out.push(d));
+  ff.stderr.on('data', (d: Buffer) => errs.push(d));
+  ff.on('error', reject);
+  ff.on('close', (code: number) => (code === 0 && out.length)
+    ? resolve(Buffer.concat(out))
+    : reject(new Error('ffmpeg wav failed: ' + Buffer.concat(errs).toString().slice(-200))));
   ff.stdin.on('error', () => { /* ignore EPIPE */ });
   ff.stdin.write(input);
   ff.stdin.end();
@@ -289,7 +307,7 @@ export class WhatsAppEngine {
 
             const m = msg.message;
             const messageContent = m?.ephemeralMessage?.message || m?.viewOnceMessage?.message || m?.viewOnceMessageV2?.message || m;
-            const textContent = (messageContent?.conversation || messageContent?.extendedTextMessage?.text || messageContent?.imageMessage?.caption || '').trim();
+            let textContent = (messageContent?.conversation || messageContent?.extendedTextMessage?.text || messageContent?.imageMessage?.caption || '').trim();
             const lowerText = textContent.toLowerCase();
             const hasMedia = !!(messageContent?.imageMessage || messageContent?.videoMessage || messageContent?.audioMessage || messageContent?.documentMessage);
 
@@ -372,6 +390,15 @@ export class WhatsAppEngine {
             if (!remoteJid || remoteJid.includes('@broadcast') || (!remoteJid.includes('@s.whatsapp.net') && !remoteJid.includes('@lid'))) continue;
 
             const pushName = msg.pushName;
+
+            // --- Speech-to-Text: transcribe incoming voice notes so the bot understands them ---
+            if (!textContent && messageContent?.audioMessage) {
+              const transcript = await this.transcribeAudio(msg);
+              if (transcript) {
+                textContent = transcript;
+                console.log(`[STT] Voice note from ${remoteJid} → "${transcript.slice(0, 80)}"`);
+              }
+            }
 
             // --- Webhook Trigger (n8n & Multiple) ---
             try {
@@ -859,6 +886,50 @@ export class WhatsAppEngine {
       });
     } catch (e) {
       console.error('[Engine] logChat failed:', e);
+    }
+  }
+
+  // Download an incoming voice note and transcribe it via Groq Whisper (session key pool → env key).
+  private async transcribeAudio(msg: any): Promise<string | null> {
+    try {
+      const agent = await this.getSessionAgent();
+      const keys: string[] = (agent?.groqKeys || []).filter((k: any) => k && k.key).map((k: any) => k.key);
+      if (process.env.GROQ_API_KEY) keys.push(process.env.GROQ_API_KEY);
+      if (keys.length === 0) { console.warn('[STT] No Groq key available for transcription.'); return null; }
+
+      let audio = await downloadMediaMessage(
+        msg, 'buffer', {},
+        { logger: P({ level: 'silent' }) as any, reuploadRequest: this.sock.updateMediaMessage }
+      ) as Buffer;
+      if (!audio || !audio.length) return null;
+
+      try { audio = await transcodeToWav(audio); } catch (e) { console.warn('[STT] WAV transcode failed, using raw:', (e as any).message); }
+
+      for (const key of keys) {
+        try {
+          const form = new FormData();
+          form.append('file', new Blob([audio], { type: 'audio/wav' }), 'audio.wav');
+          form.append('model', 'whisper-large-v3-turbo');
+          const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${key}` },
+            body: form as any
+          });
+          if (res.ok) {
+            const data: any = await res.json();
+            return (data.text || '').trim() || null;
+          }
+          if ([429, 401, 403].includes(res.status)) { console.warn(`[STT] Groq key failed (${res.status}), trying next...`); continue; }
+          console.error('[STT] Groq transcription error', res.status, (await res.text().catch(() => '')).slice(0, 150));
+          return null;
+        } catch (e) {
+          console.error('[STT] request error:', e);
+        }
+      }
+      return null;
+    } catch (e) {
+      console.error('[STT] transcribeAudio error:', e);
+      return null;
     }
   }
 
