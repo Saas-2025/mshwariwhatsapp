@@ -854,11 +854,17 @@ const maskAgent = (agent: any) => {
             isActive: !!agent.activeGroqKeyId && k.id === agent.activeGroqKeyId
         }));
     }
-    // Don't ship the (large) base64 voice notes to the client — flag them instead
+    // Don't ship large base64 voice notes / attachments to the client — flag them instead
     if (agent && Array.isArray(agent.knowledgeBase)) {
         agent.knowledgeBase = agent.knowledgeBase.map((e: any) => {
-            const { audio, ...rest } = e;
-            return { ...rest, hasAudio: !!audio };
+            const { audio, media, ...rest } = e;
+            const isDataUrl = typeof media === 'string' && media.startsWith('data:');
+            return {
+                ...rest,
+                hasAudio: !!audio,
+                hasMedia: !!media,
+                media: isDataUrl ? undefined : media // keep plain URLs, strip base64
+            };
         });
     }
     return agent;
@@ -1048,6 +1054,72 @@ app.get('/api/aiagent/knowledge/:entryId/audio', authenticateToken, async (req: 
         const entry = (agent?.knowledgeBase || []).find((e: any) => e.id === req.params.entryId);
         if (!entry || !entry.audio) return res.status(404).json({ error: 'No audio' });
         res.json({ audio: entry.audio, audioMime: entry.audioMime || 'audio/ogg' });
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Edit a knowledge entry's question / answer text
+app.put('/api/aiagent/knowledge/:entryId', authenticateToken, async (req: any, res) => {
+    try {
+        const { sessionId, question, answer } = req.body;
+        const sid = sessionId || null;
+        const ownerId = resolveAgentOwner(req, sid);
+        if (ownerId === null) return res.status(403).json({ error: 'Access denied' });
+        const existing = await storage.getItem('aiagent', { userId: ownerId, sessionId: sid });
+        if (!existing) return res.status(404).json({ error: 'Not found' });
+        existing.knowledgeBase = (existing.knowledgeBase || []).map((e: any) =>
+            e.id === req.params.entryId
+                ? { ...e, question: question !== undefined ? String(question) : e.question, answer: answer !== undefined ? String(answer) : e.answer }
+                : e
+        );
+        const saved = await storage.saveItem('aiagent', existing);
+        res.json(maskAgent(saved));
+    } catch (e: any) {
+        console.error('[AI Agent] Knowledge edit error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Add an ATTACHMENT knowledge entry (image/video/document sent when the question matches)
+app.post('/api/aiagent/attachment', authenticateToken, async (req: any, res) => {
+    try {
+        const { sessionId, question, answer, media, mediaType, fileName } = req.body;
+        if (!question || !media || !mediaType) return res.status(400).json({ error: 'Missing question, media or type' });
+        const sid = sessionId || null;
+        const ownerId = resolveAgentOwner(req, sid);
+        if (ownerId === null) return res.status(403).json({ error: 'Access denied' });
+        if (String(media).length > 7_000_000) return res.status(400).json({ error: 'الملف كبير جداً (الحد ~5MB).' });
+
+        const { v4: uuidv4 } = await import('uuid');
+        const entry = {
+            id: uuidv4(),
+            question: String(question),
+            answer: String(answer || ''),
+            media: String(media),
+            mediaType: String(mediaType),
+            fileName: String(fileName || '')
+        };
+        const existing = await storage.getItem('aiagent', { userId: ownerId, sessionId: sid }) || { userId: ownerId, sessionId: sid, knowledgeBase: [] };
+        existing.knowledgeBase = [...(existing.knowledgeBase || []), entry];
+        const saved = await storage.saveItem('aiagent', existing);
+        res.json(maskAgent(saved));
+    } catch (e: any) {
+        console.error('[AI Agent] Attachment add error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Fetch an attachment entry's media (for preview in the dashboard)
+app.get('/api/aiagent/knowledge/:entryId/media', authenticateToken, async (req: any, res) => {
+    try {
+        const sessionId = req.query.sessionId || null;
+        const ownerId = resolveAgentOwner(req, sessionId);
+        if (ownerId === null) return res.status(403).json({ error: 'Access denied' });
+        const agent = await storage.getItem('aiagent', { userId: ownerId, sessionId });
+        const entry = (agent?.knowledgeBase || []).find((e: any) => e.id === req.params.entryId);
+        if (!entry || !entry.media) return res.status(404).json({ error: 'No media' });
+        res.json({ media: entry.media, mediaType: entry.mediaType, fileName: entry.fileName });
     } catch (e: any) {
         res.status(500).json({ error: e.message });
     }

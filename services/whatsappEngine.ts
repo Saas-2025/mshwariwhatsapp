@@ -494,9 +494,9 @@ export class WhatsAppEngine {
                 } else if (aiActive) {
                   // 1) AI Agent: voice answer fast-path → otherwise text via knowledge base + memory
                   try {
-                    const voiceEntry = this.matchVoiceEntry(agent, textContent);
-                    if (voiceEntry) {
-                      await this.sendVoiceAnswer(remoteJid, voiceEntry, msg, saveConvos);
+                    const richEntry = this.matchRichEntry(agent, textContent);
+                    if (richEntry) {
+                      await this.sendRichAnswer(remoteJid, richEntry, msg, saveConvos);
                     } else {
                     const agentForReply = (chatCfg && chatCfg.customPrompt)
                       ? { ...(agent as any), systemPrompt: `${(agent as any).systemPrompt || ''}\n\nتعليمات خاصة لهذا العميل تحديداً (لها الأولوية):\n${chatCfg.customPrompt}` }
@@ -862,9 +862,9 @@ export class WhatsAppEngine {
     }
   }
 
-  // Find a voice-enabled knowledge entry whose question (fuzzy) matches the message.
-  private matchVoiceEntry(agent: any, text: string): any | null {
-    const entries = (agent?.knowledgeBase || []).filter((e: any) => e && e.audio);
+  // Find a voice/attachment knowledge entry whose question (fuzzy) matches the message.
+  private matchRichEntry(agent: any, text: string): any | null {
+    const entries = (agent?.knowledgeBase || []).filter((e: any) => e && (e.audio || e.media));
     if (entries.length === 0 || !text) return null;
     for (const entry of entries) {
       const keywords = String(entry.question || '').split(',').map((k: string) => k.trim()).filter((k: string) => k.length > 0);
@@ -875,8 +875,14 @@ export class WhatsAppEngine {
     return null;
   }
 
+  // Dispatch a rich knowledge answer: voice note or media attachment.
+  private async sendRichAnswer(remoteJid: string, entry: any, quotedMsg: any, saveConvos: boolean) {
+    if (entry.audio) return this.sendVoiceNote(remoteJid, entry, quotedMsg, saveConvos);
+    if (entry.media) return this.sendMediaAnswer(remoteJid, entry, quotedMsg, saveConvos);
+  }
+
   // Send a recorded voice note (and optional caption text) as the answer.
-  private async sendVoiceAnswer(remoteJid: string, entry: any, quotedMsg: any, saveConvos: boolean) {
+  private async sendVoiceNote(remoteJid: string, entry: any, quotedMsg: any, saveConvos: boolean) {
     try {
       const base64 = entry.audio.includes(',') ? entry.audio.split(',')[1] : entry.audio;
       let audioBuffer = Buffer.from(base64, 'base64');
@@ -922,6 +928,43 @@ export class WhatsAppEngine {
       console.log(`[AI] Sent VOICE answer to ${remoteJid}`);
     } catch (e) {
       console.error('[AI] Failed to send voice answer:', e);
+    }
+  }
+
+  // Send an image/video/document knowledge answer (base64 or URL) with optional caption.
+  private async sendMediaAnswer(remoteJid: string, entry: any, quotedMsg: any, saveConvos: boolean) {
+    try {
+      const media: string = entry.media;
+      const isUrl = media.startsWith('http');
+      const caption = entry.answer && String(entry.answer).trim() ? String(entry.answer) : undefined;
+      const buf = () => Buffer.from(media.includes(',') ? media.split(',')[1] : media, 'base64');
+      const dataMime = media.startsWith('data:') ? media.slice(5, media.indexOf(';')) : '';
+
+      const presence = entry.mediaType === 'video' ? 'recording' : 'composing';
+      await new Promise(r => setTimeout(r, 800 + Math.random() * 1200));
+      await this.sock.sendPresenceUpdate(presence, remoteJid);
+      await new Promise(r => setTimeout(r, 1200));
+      await this.sock.sendPresenceUpdate('paused', remoteJid);
+
+      let payload: any;
+      if (entry.mediaType === 'image') {
+        payload = { image: isUrl ? { url: media } : buf(), caption };
+      } else if (entry.mediaType === 'video') {
+        payload = { video: isUrl ? { url: media } : buf(), caption };
+      } else {
+        payload = { document: isUrl ? { url: media } : buf(), fileName: entry.fileName || 'file', mimetype: dataMime || 'application/octet-stream', caption };
+      }
+
+      const sent = await this.sock.sendMessage(remoteJid, payload, { quoted: quotedMsg });
+      if (sent?.key?.id) {
+        this.sentMessageIds.add(sent.key.id);
+        sentMessagesCache.set(sent.key.id, sent);
+        setTimeout(() => this.sentMessageIds.delete(sent.key.id!), 15000);
+      }
+      if (saveConvos) await this.logChat(remoteJid, 'assistant', `📎 [${entry.mediaType}]` + (entry.answer ? ` ${entry.answer}` : ''), undefined, 'ai');
+      console.log(`[AI] Sent ${entry.mediaType} answer to ${remoteJid}`);
+    } catch (e) {
+      console.error('[AI] Failed to send media answer:', e);
     }
   }
 

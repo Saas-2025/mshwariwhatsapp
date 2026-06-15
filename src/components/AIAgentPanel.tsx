@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BookOpen, Plus, Trash2, Save, AlertCircle, CheckCircle, Settings2, Power, FileText, Upload, KeyRound, Mic, Square, Play } from 'lucide-react';
+import { BookOpen, Plus, Trash2, Save, AlertCircle, CheckCircle, Settings2, Power, FileText, Upload, KeyRound, Mic, Square, Play, Search, Edit2, Paperclip, Eye, X } from 'lucide-react';
 
 export interface KnowledgeEntry { id: string; question: string; answer: string; hasAudio?: boolean; }
 export interface KnowledgeDoc { id: string; name: string; content?: string; chars?: number; }
@@ -69,6 +69,16 @@ const AIAgentPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
   const chunksRef = useRef<Blob[]>([]);
   const blobRef = useRef<Blob | null>(null);
   const recTimerRef = useRef<any>(null);
+  // Search / edit / attachment
+  const [kbSearch, setKbSearch] = useState('');
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editQ, setEditQ] = useState('');
+  const [editA, setEditA] = useState('');
+  const [attQuestion, setAttQuestion] = useState('');
+  const [attCaption, setAttCaption] = useState('');
+  const [attFileName, setAttFileName] = useState('');
+  const [attBusy, setAttBusy] = useState(false);
+  const attFileRef = useRef<HTMLInputElement>(null);
 
   const flash = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
@@ -301,6 +311,53 @@ const AIAgentPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
     } catch { /* ignore */ }
   };
 
+  const previewMedia = async (entryId: string) => {
+    try {
+      const res = await fetch(`${baseUrl()}/api/aiagent/knowledge/${entryId}/media?sessionId=${sessionId}`, { headers: authHeaders() });
+      if (res.ok) { const { media } = await res.json(); window.open(media, '_blank'); }
+    } catch { /* ignore */ }
+  };
+
+  const addAttachment = async () => {
+    const file = attFileRef.current?.files?.[0];
+    if (!attQuestion.trim() || !file) { flash('error', '❌ اكتب السؤال واختر ملفاً'); return; }
+    if (file.size > 5 * 1024 * 1024) { flash('error', '❌ الملف أكبر من 5MB'); return; }
+    setAttBusy(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader(); r.onload = () => resolve(r.result as string); r.onerror = reject; r.readAsDataURL(file);
+      });
+      const mediaType = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : 'document';
+      const res = await fetch(`${baseUrl()}/api/aiagent/attachment`, {
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ sessionId, question: attQuestion.trim(), answer: attCaption.trim(), media: dataUrl, mediaType, fileName: file.name })
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setConfig(prev => ({ ...prev, _id: saved._id, knowledgeBase: saved.knowledgeBase || [] }));
+        setAttQuestion(''); setAttCaption(''); setAttFileName('');
+        if (attFileRef.current) attFileRef.current.value = '';
+        flash('success', '✅ تم حفظ الإجابة بمرفق');
+      } else flash('error', `❌ ${(await res.json().catch(() => ({}))).error || 'فشل الحفظ'}`);
+    } catch (e: any) { flash('error', `❌ ${e.message}`); } finally { setAttBusy(false); }
+  };
+
+  const startEdit = (e: any) => { setEditId(e.id); setEditQ(e.question || ''); setEditA(e.answer || ''); };
+  const saveEdit = async (id: string) => {
+    try {
+      const res = await fetch(`${baseUrl()}/api/aiagent/knowledge/${id}`, {
+        method: 'PUT', headers: authHeaders(),
+        body: JSON.stringify({ sessionId, question: editQ, answer: editA })
+      });
+      if (res.ok) { const saved = await res.json(); setConfig(prev => ({ ...prev, knowledgeBase: saved.knowledgeBase || [] })); setEditId(null); }
+      else flash('error', `❌ ${(await res.json().catch(() => ({}))).error || 'فشل التعديل'}`);
+    } catch (e: any) { flash('error', `❌ ${e.message}`); }
+  };
+
+  const kbFiltered = (config.knowledgeBase || []).filter(e =>
+    !kbSearch || (e.question || '').toLowerCase().includes(kbSearch.toLowerCase()) || (e.answer || '').toLowerCase().includes(kbSearch.toLowerCase())
+  );
+
   if (loading) {
     return <div className="flex items-center justify-center h-40"><div className="animate-spin rounded-full h-7 w-7 border-b-2 border-emerald-500" /></div>;
   }
@@ -523,6 +580,32 @@ const AIAgentPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
             )}
           </div>
 
+          {/* Attachment answer */}
+          <div className="border-2 border-dashed border-purple-200 bg-purple-50/40 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Paperclip size={18} className="text-purple-500" />
+              <div>
+                <p className="text-sm font-bold text-slate-700">إجابة بمرفق (صورة/فيديو/ملف)</p>
+                <p className="text-xs text-slate-400">يُرسل المرفق للعميل لما يسأل سؤالاً مطابقاً</p>
+              </div>
+            </div>
+            <input value={attQuestion} onChange={e => setAttQuestion(e.target.value)} placeholder="السؤال / الكلمات المفتاحية (افصل بفاصلة)"
+              className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-sm focus:outline-none focus:border-purple-500 mb-2" />
+            <input value={attCaption} onChange={e => setAttCaption(e.target.value)} placeholder="تعليق مرافق اختياري (caption)"
+              className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-sm focus:outline-none focus:border-purple-500 mb-2" />
+            <div className="flex items-center gap-2 flex-wrap">
+              <input ref={attFileRef} type="file" accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx" className="hidden" onChange={e => setAttFileName(e.target.files && e.target.files[0] ? e.target.files[0].name : '')} />
+              <button type="button" onClick={() => attFileRef.current?.click()} className="flex items-center gap-2 bg-white border border-slate-200 text-slate-600 text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-slate-50">
+                <Upload size={16} /> اختر ملف
+              </button>
+              {attFileName && <span className="text-xs text-slate-500 truncate max-w-[160px]">{attFileName}</span>}
+              <button type="button" onClick={addAttachment} disabled={attBusy || !attQuestion.trim() || !attFileName}
+                className="flex items-center gap-1.5 bg-purple-500 hover:bg-purple-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl disabled:opacity-50">
+                <Save size={15} /> {attBusy ? 'جاري الحفظ...' : 'حفظ'}
+              </button>
+            </div>
+          </div>
+
           <div className="flex items-center gap-2 text-xs text-slate-400">
             <span className="flex-1 h-px bg-slate-100" /> أو أضف سؤال وجواب نصّي <span className="flex-1 h-px bg-slate-100" />
           </div>
@@ -537,28 +620,55 @@ const AIAgentPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
                 className="bg-emerald-500 hover:bg-emerald-600 text-white p-2.5 rounded-xl transition-all disabled:opacity-40"><Plus size={20} /></button>
             </div>
           </div>
-          <div className="space-y-2 max-h-72 overflow-y-auto custom-scrollbar">
-            {config.knowledgeBase.length === 0 && (
+          {/* Search */}
+          <div className="relative">
+            <Search size={15} className="absolute right-3 top-3 text-slate-400" />
+            <input value={kbSearch} onChange={e => setKbSearch(e.target.value)} placeholder="بحث في قواعد المعرفة..."
+              className="w-full bg-white border border-slate-200 rounded-xl py-2.5 pr-9 pl-3 text-sm focus:outline-none focus:border-emerald-500" />
+          </div>
+
+          <div className="space-y-2 max-h-80 overflow-y-auto custom-scrollbar">
+            {kbFiltered.length === 0 && (
               <div className="text-center py-6 text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-300 text-sm">
-                <BookOpen size={28} className="mx-auto mb-2 opacity-40" /> لا توجد قواعد معرفة بعد.
+                <BookOpen size={28} className="mx-auto mb-2 opacity-40" /> {kbSearch ? 'لا نتائج للبحث.' : 'لا توجد قواعد معرفة بعد.'}
               </div>
             )}
-            {config.knowledgeBase.map(entry => (
-              <div key={entry.id} className="flex gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200 group">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start gap-2"><span className="text-emerald-500 font-bold text-sm">س:</span><p className="text-slate-700 font-medium text-sm">{entry.question}</p></div>
-                  <div className="flex items-start gap-2 mt-1">
-                    <span className="text-blue-500 font-bold text-sm">ج:</span>
-                    {entry.hasAudio ? (
-                      <button type="button" onClick={() => playEntryAudio(entry.id)} className="flex items-center gap-1.5 text-amber-600 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg text-xs font-bold">
-                        <Play size={13} /> 🎤 تشغيل الرد الصوتي{entry.answer ? ` — ${entry.answer}` : ''}
-                      </button>
-                    ) : (
-                      <p className="text-slate-500 text-sm">{entry.answer}</p>
-                    )}
+            {kbFiltered.map(entry => (
+              <div key={entry.id} className="bg-slate-50 p-3 rounded-xl border border-slate-200 group">
+                {editId === entry.id ? (
+                  <div className="space-y-2">
+                    <input value={editQ} onChange={e => setEditQ(e.target.value)} className="w-full bg-white border border-slate-200 p-2 rounded-lg text-sm" placeholder="السؤال / الكلمات المفتاحية" />
+                    <textarea value={editA} onChange={e => setEditA(e.target.value)} rows={2} className="w-full bg-white border border-slate-200 p-2 rounded-lg text-sm resize-none" placeholder="الإجابة / التعليق" />
+                    <div className="flex justify-end gap-2">
+                      <button onClick={() => setEditId(null)} className="text-xs text-slate-500 px-3 py-1.5 flex items-center gap-1"><X size={13} /> إلغاء</button>
+                      <button onClick={() => saveEdit(entry.id)} className="text-xs bg-emerald-500 text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1"><Save size={13} /> حفظ</button>
+                    </div>
                   </div>
-                </div>
-                <button onClick={() => deleteKnowledge(entry.id)} className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-all p-1"><Trash2 size={16} /></button>
+                ) : (
+                  <div className="flex gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start gap-2"><span className="text-emerald-500 font-bold text-sm">س:</span><p className="text-slate-700 font-medium text-sm">{entry.question}</p></div>
+                      <div className="flex items-start gap-2 mt-1">
+                        <span className="text-blue-500 font-bold text-sm">ج:</span>
+                        {entry.hasAudio ? (
+                          <button type="button" onClick={() => playEntryAudio(entry.id)} className="flex items-center gap-1.5 text-amber-600 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg text-xs font-bold">
+                            <Play size={13} /> 🎤 تشغيل الرد الصوتي{entry.answer ? ` — ${entry.answer}` : ''}
+                          </button>
+                        ) : (entry as any).hasMedia ? (
+                          <button type="button" onClick={() => previewMedia(entry.id)} className="flex items-center gap-1.5 text-purple-600 bg-purple-50 border border-purple-200 px-2.5 py-1 rounded-lg text-xs font-bold">
+                            <Eye size={13} /> 📎 معاينة المرفق{entry.answer ? ` — ${entry.answer}` : ''}
+                          </button>
+                        ) : (
+                          <p className="text-slate-500 text-sm">{entry.answer}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-1 shrink-0">
+                      <button onClick={() => startEdit(entry)} className="text-slate-400 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-all p-1" title="تعديل"><Edit2 size={15} /></button>
+                      <button onClick={() => deleteKnowledge(entry.id)} className="text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-all p-1" title="حذف"><Trash2 size={15} /></button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>

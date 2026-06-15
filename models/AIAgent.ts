@@ -6,6 +6,9 @@ export interface IKnowledgeEntry {
   answer: string;
   audio?: string;      // base64 voice note (optional) — sent when the question matches
   audioMime?: string;
+  media?: string;      // base64 (data URL) or direct URL of an image/video/document
+  mediaType?: 'image' | 'video' | 'document';
+  fileName?: string;
 }
 
 export interface IKnowledgeDocument {
@@ -48,7 +51,10 @@ const KnowledgeEntrySchema = new Schema({
   question: { type: String, required: true },
   answer: { type: String, default: '' },
   audio: { type: String },      // base64 voice note (optional)
-  audioMime: { type: String }
+  audioMime: { type: String },
+  media: { type: String },      // base64 data URL or direct URL of an attachment
+  mediaType: { type: String },  // image | video | document
+  fileName: { type: String }
 }, { _id: false });
 
 const KnowledgeDocumentSchema = new Schema({
