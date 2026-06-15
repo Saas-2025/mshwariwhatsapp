@@ -472,8 +472,12 @@ export class WhatsAppEngine {
                 } else if (aiBlocked) {
                   console.log(`[Reply] SKIP ${remoteJid}: AI disabled for this customer (per-chat setting).`);
                 } else if (aiActive) {
-                  // 1) AI Agent is the PRIMARY responder (knowledge base + conversation memory)
+                  // 1) AI Agent: voice answer fast-path → otherwise text via knowledge base + memory
                   try {
+                    const voiceEntry = this.matchVoiceEntry(agent, textContent);
+                    if (voiceEntry) {
+                      await this.sendVoiceAnswer(remoteJid, voiceEntry, msg, saveConvos);
+                    } else {
                     const agentForReply = (chatCfg && chatCfg.customPrompt)
                       ? { ...(agent as any), systemPrompt: `${(agent as any).systemPrompt || ''}\n\nتعليمات خاصة لهذا العميل تحديداً (لها الأولوية):\n${chatCfg.customPrompt}` }
                       : agent;
@@ -493,6 +497,7 @@ export class WhatsAppEngine {
                       console.log(`[AI] Sent AI response to ${remoteJid}`);
                     } else {
                       console.warn(`[Reply] NO REPLY ${remoteJid}: AI returned nothing — check GROQ_API_KEY / Groq rate limits.`);
+                    }
                     }
                   } catch (aiErr) {
                     console.error('[AI] Error generating AI reply:', aiErr);
@@ -834,6 +839,57 @@ export class WhatsAppEngine {
       });
     } catch (e) {
       console.error('[Engine] logChat failed:', e);
+    }
+  }
+
+  // Find a voice-enabled knowledge entry whose question (fuzzy) matches the message.
+  private matchVoiceEntry(agent: any, text: string): any | null {
+    const entries = (agent?.knowledgeBase || []).filter((e: any) => e && e.audio);
+    if (entries.length === 0 || !text) return null;
+    for (const entry of entries) {
+      const keywords = String(entry.question || '').split(',').map((k: string) => k.trim()).filter((k: string) => k.length > 0);
+      for (const kw of keywords) {
+        if (AutoReplyService.fuzzyContains(text, kw)) return entry;
+      }
+    }
+    return null;
+  }
+
+  // Send a recorded voice note (and optional caption text) as the answer.
+  private async sendVoiceAnswer(remoteJid: string, entry: any, quotedMsg: any, saveConvos: boolean) {
+    try {
+      const base64 = entry.audio.includes(',') ? entry.audio.split(',')[1] : entry.audio;
+      const buffer = Buffer.from(base64, 'base64');
+
+      await new Promise(r => setTimeout(r, 800 + Math.random() * 1200));
+      await this.sock.sendPresenceUpdate('recording', remoteJid);
+      await new Promise(r => setTimeout(r, 1500));
+      await this.sock.sendPresenceUpdate('paused', remoteJid);
+
+      const sent = await this.sock.sendMessage(
+        remoteJid,
+        { audio: buffer, ptt: true, mimetype: entry.audioMime || 'audio/ogg; codecs=opus' },
+        { quoted: quotedMsg }
+      );
+      if (sent?.key?.id) {
+        this.sentMessageIds.add(sent.key.id);
+        sentMessagesCache.set(sent.key.id, sent);
+        setTimeout(() => this.sentMessageIds.delete(sent.key.id!), 15000);
+      }
+
+      // Optional text caption after the voice note
+      if (entry.answer && String(entry.answer).trim()) {
+        const t = await this.sock.sendMessage(remoteJid, { text: String(entry.answer) });
+        if (t?.key?.id) {
+          this.sentMessageIds.add(t.key.id);
+          setTimeout(() => this.sentMessageIds.delete(t.key.id!), 15000);
+        }
+      }
+
+      if (saveConvos) await this.logChat(remoteJid, 'assistant', '🎤 [رسالة صوتية]' + (entry.answer ? ` ${entry.answer}` : ''), undefined, 'ai');
+      console.log(`[AI] Sent VOICE answer to ${remoteJid}`);
+    } catch (e) {
+      console.error('[AI] Failed to send voice answer:', e);
     }
   }
 

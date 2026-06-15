@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BookOpen, Plus, Trash2, Save, AlertCircle, CheckCircle, Settings2, Power, FileText, Upload, KeyRound } from 'lucide-react';
+import { BookOpen, Plus, Trash2, Save, AlertCircle, CheckCircle, Settings2, Power, FileText, Upload, KeyRound, Mic, Square, Play } from 'lucide-react';
 
-export interface KnowledgeEntry { id: string; question: string; answer: string; }
+export interface KnowledgeEntry { id: string; question: string; answer: string; hasAudio?: boolean; }
 export interface KnowledgeDoc { id: string; name: string; content?: string; chars?: number; }
 export interface GroqKeyView { id: string; label?: string; status?: string; lastError?: string; hint?: string; isActive?: boolean; }
 export interface AIAgentConfig {
@@ -58,6 +58,17 @@ const AIAgentPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
   const [newKey, setNewKey] = useState('');
   const [newKeyLabel, setNewKeyLabel] = useState('');
   const [keyBusy, setKeyBusy] = useState(false);
+  // Voice answer recording
+  const [recState, setRecState] = useState<'idle' | 'recording' | 'recorded'>('idle');
+  const [recQuestion, setRecQuestion] = useState('');
+  const [recCaption, setRecCaption] = useState('');
+  const [recSecs, setRecSecs] = useState(0);
+  const [recUrl, setRecUrl] = useState('');
+  const [savingVoice, setSavingVoice] = useState(false);
+  const recRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const blobRef = useRef<Blob | null>(null);
+  const recTimerRef = useRef<any>(null);
 
   const flash = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
@@ -230,6 +241,64 @@ const AIAgentPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
       case 'error': return { label: 'خطأ', cls: 'bg-red-100 text-red-600' };
       default: return { label: 'لم يُختبر', cls: 'bg-slate-100 text-slate-500' };
     }
+  };
+
+  // --- Voice answer recording ---
+  const stopRecording = () => { if (recRef.current && recRef.current.state === 'recording') recRef.current.stop(); };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mime = (window as any).MediaRecorder?.isTypeSupported?.('audio/ogg;codecs=opus') ? 'audio/ogg;codecs=opus'
+        : (window as any).MediaRecorder?.isTypeSupported?.('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : '';
+      const rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      chunksRef.current = [];
+      rec.ondataavailable = e => { if (e.data.size) chunksRef.current.push(e.data); };
+      rec.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: rec.mimeType });
+        blobRef.current = blob;
+        setRecUrl(URL.createObjectURL(blob));
+        setRecState('recorded');
+        stream.getTracks().forEach(t => t.stop());
+        if (recTimerRef.current) clearInterval(recTimerRef.current);
+      };
+      recRef.current = rec;
+      rec.start();
+      setRecState('recording');
+      setRecSecs(0);
+      recTimerRef.current = setInterval(() => setRecSecs(s => { if (s >= 60) { stopRecording(); return s; } return s + 1; }), 1000);
+    } catch {
+      flash('error', '❌ تعذّر الوصول للميكروفون. اسمح بالإذن وحاول مرة أخرى.');
+    }
+  };
+
+  const resetRec = () => { setRecState('idle'); setRecUrl(''); blobRef.current = null; setRecSecs(0); };
+
+  const saveVoice = async () => {
+    if (!recQuestion.trim() || !blobRef.current) { flash('error', '❌ اكتب السؤال/الكلمات وسجّل الصوت أولاً'); return; }
+    setSavingVoice(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader(); r.onload = () => resolve(r.result as string); r.onerror = reject; r.readAsDataURL(blobRef.current!);
+      });
+      const res = await fetch(`${baseUrl()}/api/aiagent/voice`, {
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ sessionId, question: recQuestion.trim(), answer: recCaption.trim(), audio: dataUrl, audioMime: blobRef.current!.type })
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setConfig(prev => ({ ...prev, _id: saved._id, knowledgeBase: saved.knowledgeBase || [] }));
+        setRecQuestion(''); setRecCaption(''); resetRec();
+        flash('success', '✅ تم حفظ الإجابة الصوتية');
+      } else flash('error', `❌ ${(await res.json().catch(() => ({}))).error || 'فشل الحفظ'}`);
+    } catch (e: any) { flash('error', `❌ ${e.message}`); } finally { setSavingVoice(false); }
+  };
+
+  const playEntryAudio = async (entryId: string) => {
+    try {
+      const res = await fetch(`${baseUrl()}/api/aiagent/knowledge/${entryId}/audio?sessionId=${sessionId}`, { headers: authHeaders() });
+      if (res.ok) { const { audio } = await res.json(); new Audio(audio).play().catch(() => { }); }
+    } catch { /* ignore */ }
   };
 
   if (loading) {
@@ -416,8 +485,46 @@ const AIAgentPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
             )}
           </div>
 
+          {/* Voice answer recording */}
+          <div className="border-2 border-dashed border-amber-200 bg-amber-50/40 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Mic size={18} className="text-amber-500" />
+              <div>
+                <p className="text-sm font-bold text-slate-700">إجابة صوتية (بصوتك)</p>
+                <p className="text-xs text-slate-400">سجّل صوت، ولما العميل يسأل سؤالاً مطابقاً يوصله الريكورد كرسالة صوتية</p>
+              </div>
+            </div>
+            <input value={recQuestion} onChange={e => setRecQuestion(e.target.value)} placeholder="السؤال / الكلمات المفتاحية (افصل بفاصلة)"
+              className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-sm focus:outline-none focus:border-amber-500 mb-2" />
+            <div className="flex items-center gap-3 flex-wrap">
+              {recState === 'idle' && (
+                <button type="button" onClick={startRecording} className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl">
+                  <Mic size={16} /> ابدأ التسجيل
+                </button>
+              )}
+              {recState === 'recording' && (
+                <button type="button" onClick={stopRecording} className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl animate-pulse">
+                  <Square size={14} /> إيقاف ({recSecs}ث)
+                </button>
+              )}
+              {recState === 'recorded' && (
+                <>
+                  <audio src={recUrl} controls className="h-9" />
+                  <button type="button" onClick={resetRec} className="text-xs text-slate-500 hover:text-slate-700 px-3 py-2">إعادة</button>
+                  <button type="button" onClick={saveVoice} disabled={savingVoice || !recQuestion.trim()} className="flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl disabled:opacity-50">
+                    <Save size={15} /> {savingVoice ? 'جاري الحفظ...' : 'حفظ'}
+                  </button>
+                </>
+              )}
+            </div>
+            {recState === 'recorded' && (
+              <input value={recCaption} onChange={e => setRecCaption(e.target.value)} placeholder="نص مرافق اختياري (يُرسل بعد الصوت)"
+                className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-sm focus:outline-none focus:border-amber-500 mt-2" />
+            )}
+          </div>
+
           <div className="flex items-center gap-2 text-xs text-slate-400">
-            <span className="flex-1 h-px bg-slate-100" /> أو أضف سؤال وجواب يدوياً <span className="flex-1 h-px bg-slate-100" />
+            <span className="flex-1 h-px bg-slate-100" /> أو أضف سؤال وجواب نصّي <span className="flex-1 h-px bg-slate-100" />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -440,7 +547,16 @@ const AIAgentPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
               <div key={entry.id} className="flex gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200 group">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start gap-2"><span className="text-emerald-500 font-bold text-sm">س:</span><p className="text-slate-700 font-medium text-sm">{entry.question}</p></div>
-                  <div className="flex items-start gap-2 mt-1"><span className="text-blue-500 font-bold text-sm">ج:</span><p className="text-slate-500 text-sm">{entry.answer}</p></div>
+                  <div className="flex items-start gap-2 mt-1">
+                    <span className="text-blue-500 font-bold text-sm">ج:</span>
+                    {entry.hasAudio ? (
+                      <button type="button" onClick={() => playEntryAudio(entry.id)} className="flex items-center gap-1.5 text-amber-600 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg text-xs font-bold">
+                        <Play size={13} /> 🎤 تشغيل الرد الصوتي{entry.answer ? ` — ${entry.answer}` : ''}
+                      </button>
+                    ) : (
+                      <p className="text-slate-500 text-sm">{entry.answer}</p>
+                    )}
+                  </div>
                 </div>
                 <button onClick={() => deleteKnowledge(entry.id)} className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-all p-1"><Trash2 size={16} /></button>
               </div>

@@ -4,6 +4,8 @@ export interface IKnowledgeEntry {
   id: string;
   question: string;
   answer: string;
+  audio?: string;      // base64 voice note (optional) — sent when the question matches
+  audioMime?: string;
 }
 
 export interface IKnowledgeDocument {
@@ -44,7 +46,9 @@ export interface IAIAgent extends Document {
 const KnowledgeEntrySchema = new Schema({
   id: { type: String, required: true },
   question: { type: String, required: true },
-  answer: { type: String, required: true }
+  answer: { type: String, default: '' },
+  audio: { type: String },      // base64 voice note (optional)
+  audioMime: { type: String }
 }, { _id: false });
 
 const KnowledgeDocumentSchema = new Schema({

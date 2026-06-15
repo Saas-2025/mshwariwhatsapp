@@ -854,6 +854,13 @@ const maskAgent = (agent: any) => {
             isActive: !!agent.activeGroqKeyId && k.id === agent.activeGroqKeyId
         }));
     }
+    // Don't ship the (large) base64 voice notes to the client — flag them instead
+    if (agent && Array.isArray(agent.knowledgeBase)) {
+        agent.knowledgeBase = agent.knowledgeBase.map((e: any) => {
+            const { audio, ...rest } = e;
+            return { ...rest, hasAudio: !!audio };
+        });
+    }
     return agent;
 };
 
@@ -994,6 +1001,54 @@ app.delete('/api/aiagent/knowledge/:entryId', authenticateToken, async (req: any
         res.json(maskAgent(saved));
     } catch (e: any) {
         console.error('[AI Agent] Knowledge delete error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Add a VOICE knowledge entry — recorded voice note sent when the question matches
+app.post('/api/aiagent/voice', authenticateToken, async (req: any, res) => {
+    try {
+        const { sessionId, question, answer, audio, audioMime } = req.body;
+        if (!question || !audio) return res.status(400).json({ error: 'Missing question or audio' });
+        const sid = sessionId || null;
+        const ownerId = resolveAgentOwner(req, sid);
+        if (ownerId === null) return res.status(403).json({ error: 'Access denied' });
+
+        if (String(audio).length > 2_700_000) {
+            return res.status(400).json({ error: 'التسجيل طويل جداً (الحد ~2MB، حوالي دقيقة).' });
+        }
+
+        const { v4: uuidv4 } = await import('uuid');
+        const entry = {
+            id: uuidv4(),
+            question: String(question),
+            answer: String(answer || ''),
+            audio: String(audio),
+            audioMime: String(audioMime || 'audio/ogg')
+        };
+
+        const existing = await storage.getItem('aiagent', { userId: ownerId, sessionId: sid })
+            || { userId: ownerId, sessionId: sid, knowledgeBase: [] };
+        existing.knowledgeBase = [...(existing.knowledgeBase || []), entry];
+        const saved = await storage.saveItem('aiagent', existing);
+        res.json(maskAgent(saved));
+    } catch (e: any) {
+        console.error('[AI Agent] Voice add error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Fetch a voice entry's audio (for playback in the dashboard)
+app.get('/api/aiagent/knowledge/:entryId/audio', authenticateToken, async (req: any, res) => {
+    try {
+        const sessionId = req.query.sessionId || null;
+        const ownerId = resolveAgentOwner(req, sessionId);
+        if (ownerId === null) return res.status(403).json({ error: 'Access denied' });
+        const agent = await storage.getItem('aiagent', { userId: ownerId, sessionId });
+        const entry = (agent?.knowledgeBase || []).find((e: any) => e.id === req.params.entryId);
+        if (!entry || !entry.audio) return res.status(404).json({ error: 'No audio' });
+        res.json({ audio: entry.audio, audioMime: entry.audioMime || 'audio/ogg' });
+    } catch (e: any) {
         res.status(500).json({ error: e.message });
     }
 });
