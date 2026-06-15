@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Send, Image, FileText, Clock, AlertCircle, CheckCircle2, Bold, Italic, Strikethrough, Code, Smile, X, Hash, Filter, AlertTriangle } from 'lucide-react';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
+import RecipientTools from './RecipientTools';
 
 interface MessageSenderProps {
     socket: any;
@@ -113,6 +114,13 @@ const MessageSender: React.FC<MessageSenderProps> = ({ socket, status }) => {
             socket.off('message-complete', handleComplete);
         };
     }, [socket]); // Only re-run if socket object changes
+
+    const addNumbers = (nums: string[]) => {
+        setNumbers(prev => {
+            const existing = prev.split('\n').map(n => n.trim()).filter(Boolean);
+            return [...new Set([...existing, ...nums])].join('\n');
+        });
+    };
 
     const handleRemoveDuplicates = () => {
         let list = numbers.split('\n').map(n => n.trim()).filter(n => n.length > 0);
@@ -284,12 +292,14 @@ const MessageSender: React.FC<MessageSenderProps> = ({ socket, status }) => {
                             <Filter size={12} /> حذف المكرر
                         </button>
                     </div>
+                    <div className="mb-2"><RecipientTools sessionId={selectedSessionId} onAdd={addNumbers} /></div>
                     <textarea
                         className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono h-32 focus:outline-none focus:border-emerald-500 transition-colors"
                         placeholder="9665xxxxxxxx&#10;9665xxxxxxxx"
                         value={numbers}
                         onChange={(e) => setNumbers(e.target.value)}
                     ></textarea>
+                    {numbers.trim() && <p className="text-[11px] text-slate-400 mt-1">{numbers.split('\n').map(n => n.trim()).filter(Boolean).length} رقم</p>}
                 </div>
 
                 {/* ... Message Type & Content ... */}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Megaphone, Search, RefreshCw, CheckCircle2, XCircle, Send, Image as ImageIcon, FileText, Video, Mic, Clock } from 'lucide-react';
+import { Megaphone, Search, RefreshCw, CheckCircle2, XCircle, Send, Image as ImageIcon, FileText, Video, Mic, Clock, FileSpreadsheet } from 'lucide-react';
 import MessageSender from '../components/MessageSender';
+import { exportExcel, exportPDF } from '../lib/exporters';
 
 interface CampaignsProps {
     socket: any;
@@ -50,6 +51,15 @@ const CampaignHistory: React.FC = () => {
         (!q || (c.sessionName || '').toLowerCase().includes(q) || (c.preview || '').toLowerCase().includes(q) || (c.ownerName || '').toLowerCase().includes(q))
     );
 
+    const expHeaders = ['التاريخ', 'الجهاز', ...(isAdmin ? ['المالك'] : []), 'النوع', 'الرسالة', 'الإجمالي', 'ناجح', 'فاشل', 'الحالة'];
+    const expRows = () => shown.map(c => [
+        fmtDate(c.createdAt), c.sessionName, ...(isAdmin ? [c.ownerName || ''] : []),
+        (TYPE_META[c.type] || TYPE_META.text).label, c.preview || '', c.total, c.success, c.failed,
+        c.status === 'completed' ? 'مكتملة' : 'موقوفة'
+    ]);
+    const doExcel = () => exportExcel('campaigns.xlsx', 'الحملات', expHeaders, expRows());
+    const doPDF = () => exportPDF('تقرير الحملات المُرسلة', expHeaders, expRows(), `عدد الحملات: ${shown.length}`);
+
     return (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
             <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
@@ -68,6 +78,8 @@ const CampaignHistory: React.FC = () => {
                             </button>
                         ))}
                     </div>
+                    <button onClick={doExcel} disabled={!shown.length} className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg shrink-0 disabled:opacity-40" title="تصدير Excel"><FileSpreadsheet size={16} /></button>
+                    <button onClick={doPDF} disabled={!shown.length} className="p-2 text-red-500 hover:bg-red-50 rounded-lg shrink-0 disabled:opacity-40" title="تصدير PDF"><FileText size={16} /></button>
                     <button onClick={() => { setLoading(true); load(); }} className="p-2 text-slate-400 hover:bg-slate-100 rounded-lg shrink-0" title="تحديث"><RefreshCw size={16} /></button>
                 </div>
             </div>
