@@ -9,6 +9,7 @@ export interface IChatLog extends Document {
     sessionId: string;
     userId?: string;
     remoteJid: string;
+    senderNumber?: string; // real phone number (resolved from senderPn for @lid chats)
     role: 'user' | 'assistant';
     text: string;
     pushName?: string;
@@ -21,6 +22,7 @@ const ChatLogSchema = new Schema<IChatLog>({
     sessionId: { type: String, required: true },
     userId: { type: String },
     remoteJid: { type: String, required: true },
+    senderNumber: { type: String, default: '' },
     role: { type: String, enum: ['user', 'assistant'], required: true },
     text: { type: String, default: '' },
     pushName: { type: String },

@@ -1323,6 +1323,7 @@ app.get('/api/sessions/:sessionId/conversations', authenticateToken, async (req:
                     lastRole: { $first: '$role' },
                     lastTime: { $first: '$timestamp' },
                     pushName: { $max: '$pushName' },
+                    senderNumber: { $max: '$senderNumber' },
                     total: { $sum: 1 }
                 }
             },
@@ -1333,16 +1334,21 @@ app.get('/api/sessions/:sessionId/conversations', authenticateToken, async (req:
         const cats = await storage.getItems('chat_settings', { sessionId });
         const catByJid: Record<string, string> = {};
         cats.forEach((s: any) => { if (s.categoryId) catByJid[s.remoteJid] = s.categoryId; });
-        res.json(convos.map(c => ({
-            remoteJid: c._id,
-            number: (c._id || '').split('@')[0],
-            pushName: c.pushName,
-            lastText: c.lastText,
-            lastRole: c.lastRole,
-            lastTime: c.lastTime,
-            total: c.total,
-            categoryId: catByJid[c._id] || ''
-        })));
+        res.json(convos.map(c => {
+            const jidNum = (c._id || '').split('@')[0];
+            // Show the real mobile when we have it (esp. for @lid chats)
+            const number = (c._id || '').includes('@s.whatsapp.net') ? jidNum : (c.senderNumber || jidNum);
+            return {
+                remoteJid: c._id,
+                number,
+                pushName: c.pushName,
+                lastText: c.lastText,
+                lastRole: c.lastRole,
+                lastTime: c.lastTime,
+                total: c.total,
+                categoryId: catByJid[c._id] || ''
+            };
+        }));
     } catch (e: any) {
         console.error('[Conversations] list error:', e);
         res.status(500).json({ error: 'Failed to fetch conversations' });
@@ -1463,7 +1469,7 @@ app.get('/api/sessions/:sessionId/recipients', authenticateToken, async (req: an
         const rows = await ChatLog.aggregate([
             { $match: { sessionId } },
             { $sort: { timestamp: -1 } },
-            { $group: { _id: '$remoteJid', pushName: { $max: '$pushName' }, lastTime: { $first: '$timestamp' } } },
+            { $group: { _id: '$remoteJid', pushName: { $max: '$pushName' }, senderNumber: { $max: '$senderNumber' }, lastTime: { $first: '$timestamp' } } },
             { $sort: { lastTime: -1 } },
             { $limit: 5000 }
         ]);
@@ -1472,7 +1478,13 @@ app.get('/api/sessions/:sessionId/recipients', authenticateToken, async (req: an
         cats.forEach((s: any) => { if (s.categoryId) catByJid[s.remoteJid] = s.categoryId; });
         const out = rows
             .filter((r: any) => r._id && (r._id.includes('@s.whatsapp.net') || r._id.includes('@lid')))
-            .map((r: any) => ({ remoteJid: r._id, number: (r._id || '').split('@')[0].replace(/\D/g, ''), name: r.pushName || '', categoryId: catByJid[r._id] || '' }))
+            .map((r: any) => {
+                // Real mobile number: JID for normal chats, resolved senderNumber for @lid chats
+                const number = r._id.includes('@s.whatsapp.net')
+                    ? r._id.split('@')[0].replace(/\D/g, '')
+                    : (r.senderNumber || '').replace(/\D/g, '');
+                return { remoteJid: r._id, number, name: r.pushName || '', categoryId: catByJid[r._id] || '' };
+            })
             .filter((r: any) => r.number.length >= 8);
         res.json(out);
     } catch (e: any) { res.status(500).json({ error: e.message }); }

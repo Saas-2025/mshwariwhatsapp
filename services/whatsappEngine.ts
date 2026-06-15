@@ -509,8 +509,15 @@ export class WhatsAppEngine {
                 const aiActive = !!(agent && agent.isActive) && !aiBlocked;
                 const history = (aiActive && saveConvos) ? await this.buildHistory(remoteJid) : [];
 
+                // Resolve the customer's real phone number: for @lid chats it comes from key.senderPn,
+                // for normal chats it's the JID itself. Stored so campaigns get the real mobile, not the LID.
+                const senderPn = (msg.key as any)?.senderPn as string | undefined;
+                const senderNumber = senderPn
+                    ? senderPn.split('@')[0].replace(/\D/g, '')
+                    : (remoteJid.includes('@s.whatsapp.net') ? remoteJid.split('@')[0].replace(/\D/g, '') : '');
+
                 // Record the inbound message (skipped if saving is disabled for this session)
-                if (saveConvos) await this.logChat(remoteJid, 'user', textContent, pushName);
+                if (saveConvos) await this.logChat(remoteJid, 'user', textContent, pushName, 'manual', senderNumber);
 
                 if (replyDisabled) {
                   console.log(`[Reply] SKIP ${remoteJid}: auto-reply is OFF for this session (master switch "التشغيل العام").`);
@@ -915,12 +922,13 @@ export class WhatsAppEngine {
     }
   }
 
-  private async logChat(remoteJid: string, role: 'user' | 'assistant', text: string, pushName?: string, source: 'ai' | 'keyword' | 'manual' = 'manual') {
+  private async logChat(remoteJid: string, role: 'user' | 'assistant', text: string, pushName?: string, source: 'ai' | 'keyword' | 'manual' = 'manual', senderNumber?: string) {
     try {
       await ChatLog.create({
         sessionId: this.sessionId,
         userId: this.userId,
         remoteJid,
+        senderNumber: senderNumber || '',
         role,
         text: (text || '').slice(0, 4000),
         pushName,
