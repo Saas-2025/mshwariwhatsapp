@@ -12,6 +12,7 @@ export interface ISession extends Document {
   autoReplyEnabled?: boolean; // Toggles all auto-replies for this session
   saveConversations?: boolean; // If false, this session's chats are not stored (no logs/analytics/memory)
   aiApiKey?: string; // Public key letting an external website use this session's AI
+  supervisorPhone?: string; // Admin/supervisor WhatsApp number to notify on [HUMAN_TAKEOVER]
   createdAt?: string;
   updatedAt?: string;
 }
@@ -45,7 +46,8 @@ const SessionSchema = new Schema<ISession>({
     type: Boolean,
     default: true
   },
-  aiApiKey: { type: String, default: '', index: true }
+  aiApiKey: { type: String, default: '', index: true },
+  supervisorPhone: { type: String, default: '' }
 }, {
   timestamps: true
 });

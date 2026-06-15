@@ -5,6 +5,7 @@ const AVAILABLE_PERMISSIONS = [
     { id: 'devices', label: 'الأجهزة (وكل إعداداتها)' },
     { id: 'campaigns', label: 'إرسال الحملات' },
     { id: 'scheduled_campaigns', label: 'جدولة الحملات' },
+    { id: 'api_access', label: 'الربط البرمجي (API)' },
 ];
 
 interface FormShape {

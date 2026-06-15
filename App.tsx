@@ -13,6 +13,7 @@ import Dashboard from './src/pages/Dashboard';
 import Settings from './src/pages/Settings';
 import Subscriptions from './src/pages/Subscriptions';
 import Support from './src/pages/Support';
+import ApiDocs from './src/pages/ApiDocs';
 import { Menu } from 'lucide-react';
 import { useLang } from './src/i18n';
 import { BrandMark } from './src/components/Logo';
@@ -161,6 +162,7 @@ const App = () => {
           <Route path="/scheduled-campaigns" element={<ScheduledCampaigns />} />
           <Route path="/subscriptions" element={<Subscriptions />} />
           <Route path="/support" element={<Support />} />
+          <Route path="/api" element={<ApiDocs />} />
           <Route path="/users" element={<Users />} />
           <Route path="/settings" element={<Settings />} />
         </Route>

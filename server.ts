@@ -79,6 +79,33 @@ const requireAdmin = (req: any, res: any, next: any) => {
     }
 };
 
+// Accepts EITHER a dashboard JWT or an account-level API key (x-api-key / Bearer ak_... / ?api_key).
+// Used on the public REST endpoints documented for external integrations.
+const authenticateTokenOrApiKey = async (req: any, res: any, next: any) => {
+    const authHeader = req.headers['authorization'] || '';
+    const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    const apiKey = String(req.headers['x-api-key'] || req.query.api_key || (bearer.startsWith('ak_') ? bearer : '')).trim();
+
+    if (apiKey.startsWith('ak_')) {
+        try {
+            const user = await storage.getItem('users', { apiKey });
+            if (!user) return res.status(403).json({ success: false, error_code: 'INVALID_API_KEY', message: 'مفتاح API غير صحيح' });
+            if (user.isActive === false) return res.status(403).json({ success: false, error_code: 'ACCOUNT_SUSPENDED', message: 'الحساب موقوف' });
+            req.user = { userId: user._id, role: user.role };
+            return next();
+        } catch (e: any) {
+            return res.status(500).json({ success: false, error_code: 'AUTH_ERROR', message: e.message });
+        }
+    }
+
+    if (!bearer) return res.status(401).json({ success: false, error_code: 'UNAUTHORIZED', message: 'مطلوب مفتاح API أو تسجيل دخول' });
+    jwt.verify(bearer, JWT_SECRET, (err: any, user: any) => {
+        if (err) return res.status(403).json({ success: false, error_code: 'FORBIDDEN', message: 'بيانات اعتماد غير صالحة' });
+        req.user = user;
+        next();
+    });
+};
+
 // Seed Admin User
 const seedAdmin = async () => {
     try {
@@ -298,6 +325,26 @@ app.get('/api/me', authenticateToken, async (req: any, res) => {
     res.json(user);
 });
 
+// --- Account-level API key (external REST API) ---
+const genAccountKey = () => 'ak_' + randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '');
+
+app.get('/api/account/api-key', authenticateToken, async (req: any, res) => {
+    try {
+        const user = await storage.getItem('users', { _id: req.user.userId });
+        res.json({ apiKey: user?.apiKey || '' });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/account/api-key/regenerate', authenticateToken, async (req: any, res) => {
+    try {
+        const user = await storage.getItem('users', { _id: req.user.userId });
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        const apiKey = genAccountKey();
+        await storage.saveItem('users', { _id: user._id, apiKey });
+        res.json({ apiKey });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // List Users (Admin Only)
 app.get('/api/users', authenticateToken, requireAdmin, async (req: any, res) => {
     console.log('--> GET /api/users REQUEST');
@@ -416,7 +463,7 @@ app.post('/api/auth/change-password', authenticateToken, async (req: any, res) =
 // --- Secured API Endpoints ---
 
 // Get User's Sessions
-app.get('/api/sessions', authenticateToken, async (req: any, res) => {
+app.get('/api/sessions', authenticateTokenOrApiKey, async (req: any, res) => {
     const isAdmin = req.user.role === 'admin';
     const list = isAdmin ? SessionService.getAllSessions() : SessionService.getUserSessions(req.user.userId);
 
@@ -545,7 +592,7 @@ setInterval(() => {
     }
 }, 60 * 60 * 1000);
 
-app.post('/api/sessions/:sessionId/messages', authenticateToken, async (req: any, res) => {
+app.post('/api/sessions/:sessionId/messages', authenticateTokenOrApiKey, async (req: any, res) => {
     const { sessionId } = req.params;
     const { to, text, media_url, media_id, media_type, filename, caption } = req.body;
     const idempotencyKey = req.headers['idempotency-key'];
@@ -746,7 +793,8 @@ app.get('/api/sessions/:sessionId/settings', authenticateToken, async (req: any,
     }
     res.json({
         autoReplyEnabled: session.autoReplyEnabled !== false,
-        saveConversations: session.saveConversations !== false
+        saveConversations: session.saveConversations !== false,
+        supervisorPhone: session.supervisorPhone || ''
     });
 });
 
@@ -757,10 +805,11 @@ app.put('/api/sessions/:sessionId/settings', authenticateToken, async (req: any,
         return res.status(404).json({ error: 'Session not found or access denied' });
     }
     try {
-        const { autoReplyEnabled, saveConversations } = req.body;
+        const { autoReplyEnabled, saveConversations, supervisorPhone } = req.body;
         const updated: any = { ...session };
         if (autoReplyEnabled !== undefined) updated.autoReplyEnabled = !!autoReplyEnabled;
         if (saveConversations !== undefined) updated.saveConversations = !!saveConversations;
+        if (supervisorPhone !== undefined) updated.supervisorPhone = String(supervisorPhone).replace(/[^\d]/g, '');
         if (updated._id) delete updated._id;
         delete updated.createdAt;
         delete updated.updatedAt;
@@ -768,7 +817,8 @@ app.put('/api/sessions/:sessionId/settings', authenticateToken, async (req: any,
         res.json({
             success: true,
             autoReplyEnabled: updated.autoReplyEnabled !== false,
-            saveConversations: updated.saveConversations !== false
+            saveConversations: updated.saveConversations !== false,
+            supervisorPhone: updated.supervisorPhone || ''
         });
     } catch (e: any) {
         console.error('[Session Settings] error:', e);

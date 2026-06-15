@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { Send, Users, Settings, LogOut, Smartphone, X, Calendar, ChevronRight, Globe, LayoutDashboard, CreditCard, LifeBuoy } from 'lucide-react';
+import { Send, Users, Settings, LogOut, Smartphone, X, Calendar, ChevronRight, Globe, LayoutDashboard, CreditCard, LifeBuoy, Code2 } from 'lucide-react';
 import { useLang } from '../../i18n';
 import { BrandMark } from '../Logo';
 
@@ -22,6 +22,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout, isOpen, onClose, systemName
         { to: '/devices', icon: <Smartphone size={20} />, label: t('devices'), permission: 'devices' },
         { to: '/campaigns', icon: <Send size={20} />, label: t('campaigns'), permission: 'campaigns' },
         { to: '/scheduled-campaigns', icon: <Calendar size={20} />, label: t('scheduled'), permission: 'scheduled_campaigns' },
+        { to: '/api', icon: <Code2 size={20} />, label: t('api'), permission: 'api_access' },
     ];
 
     const links = allLinks.filter(link => {

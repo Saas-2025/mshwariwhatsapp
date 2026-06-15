@@ -8,6 +8,7 @@ export interface IUser extends Document {
     permissions?: string[];
     maxSessions?: number; // 0 = unlimited (admins are always unlimited)
     planId?: string;      // subscribed plan
+    apiKey?: string;      // account-level key for the external REST API
     isActive?: boolean;
     createdAt?: string;
     updatedAt?: string;
@@ -21,6 +22,7 @@ const UserSchema = new Schema<IUser>({
     permissions: { type: [String], default: [] },
     maxSessions: { type: Number, default: 0 }, // 0 = unlimited
     planId: { type: String, default: '' },
+    apiKey: { type: String, default: '', index: true },
     isActive: { type: Boolean, default: true }
 }, {
     timestamps: true

@@ -525,10 +525,24 @@ export class WhatsAppEngine {
                     if (richEntry) {
                       await this.sendRichAnswer(remoteJid, richEntry, msg, saveConvos);
                     } else {
-                    const agentForReply = (chatCfg && chatCfg.customPrompt)
+                    let agentForReply: any = (chatCfg && chatCfg.customPrompt)
                       ? { ...(agent as any), systemPrompt: `${(agent as any).systemPrompt || ''}\n\nتعليمات خاصة لهذا العميل تحديداً (لها الأولوية):\n${chatCfg.customPrompt}` }
                       : agent;
-                    const aiReply = await getAIResponse(agentForReply as any, textContent, history);
+
+                    // Human-handoff: if a supervisor phone is set, let the AI request escalation via a token
+                    const sessionRec = await storage.getItem('sessions', { id: this.sessionId });
+                    const supervisorPhone = (sessionRec?.supervisorPhone || '').replace(/\D/g, '');
+                    if (supervisorPhone) {
+                      agentForReply = { ...(agentForReply as any), systemPrompt: `${(agentForReply as any).systemPrompt || ''}\n\n[تعليمات التصعيد] إذا طلب العميل التحدث مع موظف/إنسان، أو كان غاضباً أو لديه شكوى لا تستطيع حلّها، أو واجه مشكلة تتطلب تدخلاً بشرياً، فأضِف الوسم [HUMAN_TAKEOVER] في نهاية ردّك. سيُحذف الوسم تلقائياً قبل الإرسال للعميل وسيتم إشعار المسؤول.` };
+                    }
+
+                    let aiReply = await getAIResponse(agentForReply as any, textContent, history);
+                    let needsHuman = false;
+                    if (aiReply && /\[HUMAN[_\s-]?TAKEOVER\]/i.test(aiReply)) {
+                      needsHuman = true;
+                      aiReply = aiReply.replace(/\[HUMAN[_\s-]?TAKEOVER\]/ig, '').trim();
+                      if (!aiReply) aiReply = 'تم تحويل محادثتك إلى أحد ممثلي خدمة العملاء، وسيتم التواصل معك في أقرب وقت. شكراً لتفهمك 🙏';
+                    }
                     if (aiReply) {
                       await new Promise(r => setTimeout(r, 800 + Math.random() * 1500));
                       await this.sock.sendPresenceUpdate('composing', remoteJid);
@@ -542,6 +556,14 @@ export class WhatsAppEngine {
                       }
                       if (saveConvos) await this.logChat(remoteJid, 'assistant', aiReply, undefined, 'ai');
                       console.log(`[AI] Sent AI response to ${remoteJid}`);
+
+                      // Escalation: notify the supervisor on WhatsApp + pause the bot for this chat
+                      if (needsHuman && supervisorPhone) {
+                        await this.notifySupervisor(supervisorPhone, sessionRec, remoteJid, pushName, textContent);
+                        try {
+                          await storage.saveItem('muted_chats', { sessionId: this.sessionId, chatId: remoteJid, mutedUntil: new Date(Date.now() + HUMAN_TAKEOVER_MINUTES * 60 * 1000) });
+                        } catch { /* ignore */ }
+                      }
                     } else {
                       console.warn(`[Reply] NO REPLY ${remoteJid}: AI returned nothing — check GROQ_API_KEY / Groq rate limits.`);
                     }
@@ -714,6 +736,27 @@ export class WhatsAppEngine {
       console.error('[Engine] Failed to start session:', error);
       this.status = 'ERROR';
       throw error;
+    }
+  }
+
+  // Notify the configured supervisor on WhatsApp that a chat needs human intervention.
+  private async notifySupervisor(supervisorPhone: string, sessionRec: any, customerJid: string, pushName: string | undefined, lastMessage: string) {
+    try {
+      if (!this.sock || this.status !== 'CONNECTED') return;
+      const supervisorJid = `${supervisorPhone}@s.whatsapp.net`;
+      const customerNumber = (customerJid.split('@')[0] || '').replace(/\D/g, '');
+      const deviceName = sessionRec?.name || this.sessionId;
+      const text =
+        `🚨 *طلب تدخل بشري*\n\n` +
+        `📱 الجهاز: ${deviceName}\n` +
+        `👤 العميل: ${pushName || 'غير معروف'}\n` +
+        `☎️ رقم العميل: ${customerNumber}\n` +
+        `💬 آخر رسالة: ${lastMessage || '—'}\n\n` +
+        `يرجى التواصل مع العميل في أقرب وقت. (تم إيقاف الرد الآلي مؤقتاً لهذه المحادثة)`;
+      await this.sock.sendMessage(supervisorJid, { text });
+      console.log(`[Human Takeover] Notified supervisor ${supervisorPhone} for ${customerJid}`);
+    } catch (e: any) {
+      console.error('[Human Takeover] Failed to notify supervisor:', e?.message || e);
     }
   }
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Smartphone, RefreshCw, QrCode, CheckCircle2, Trash2, X, Code, Copy, Check, Bot,
-  Share2, Info, Brain, MessageSquare, BarChart3, ChevronRight, Plus, Facebook
+  Share2, Info, Brain, MessageSquare, BarChart3, ChevronRight, Plus, Facebook, ShieldAlert, Save
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import AIAgentPanel from '../components/AIAgentPanel';
@@ -49,7 +49,8 @@ const SessionDetail: React.FC<{ socket: any }> = ({ socket }) => {
   const [webhookNameInput, setWebhookNameInput] = useState('');
   const [webhookUrlInput, setWebhookUrlInput] = useState('');
   const [webhooksList, setWebhooksList] = useState<{ name: string; url: string }[]>([]);
-  const [settings, setSettings] = useState<{ autoReplyEnabled: boolean; saveConversations: boolean }>({ autoReplyEnabled: true, saveConversations: true });
+  const [settings, setSettings] = useState<{ autoReplyEnabled: boolean; saveConversations: boolean; supervisorPhone: string }>({ autoReplyEnabled: true, saveConversations: true, supervisorPhone: '' });
+  const [supPhoneSaved, setSupPhoneSaved] = useState(false);
   const [aiKey, setAiKey] = useState('');
 
   useEffect(() => {
@@ -122,7 +123,7 @@ const SessionDetail: React.FC<{ socket: any }> = ({ socket }) => {
     } catch { /* ignore */ }
   };
 
-  const updateSetting = async (patch: Partial<{ autoReplyEnabled: boolean; saveConversations: boolean }>) => {
+  const updateSetting = async (patch: Partial<{ autoReplyEnabled: boolean; saveConversations: boolean; supervisorPhone: string }>) => {
     const prev = settings;
     setSettings(s => ({ ...s, ...patch }));
     try {
@@ -131,6 +132,11 @@ const SessionDetail: React.FC<{ socket: any }> = ({ socket }) => {
       });
       if (!res.ok) { setSettings(prev); alert('فشل حفظ الإعداد'); }
     } catch { setSettings(prev); }
+  };
+
+  const saveSupervisor = async () => {
+    await updateSetting({ supervisorPhone: settings.supervisorPhone });
+    setSupPhoneSaved(true); setTimeout(() => setSupPhoneSaved(false), 2000);
   };
 
   const copy = (text: string, which: 'url' | 'token') => {
@@ -271,6 +277,29 @@ const SessionDetail: React.FC<{ socket: any }> = ({ socket }) => {
                 <button onClick={() => updateSetting({ saveConversations: !settings.saveConversations })} className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${settings.saveConversations ? 'bg-blue-600' : 'bg-slate-300'}`}>
                   <span className={`inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform ${settings.saveConversations ? 'translate-x-1' : 'translate-x-6'}`} />
                 </button>
+              </div>
+
+              {/* Supervisor phone for human-takeover alerts */}
+              <div className="rounded-xl p-4 border border-amber-200 bg-amber-50/60">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-amber-500 text-white shrink-0"><ShieldAlert size={20} /></div>
+                  <div>
+                    <p className="font-bold text-slate-700">رقم المشرف للتنبيهات</p>
+                    <p className="text-xs text-slate-500">يصلك تنبيه واتساب بتفاصيل المحادثة عند طلب التدخل البشري (الوسم <span className="font-mono">[HUMAN_TAKEOVER]</span>)</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="tel" dir="ltr" value={settings.supervisorPhone}
+                    onChange={e => setSettings(s => ({ ...s, supervisorPhone: e.target.value.replace(/[^\d]/g, '') }))}
+                    placeholder="201001234567 (رقم بمقدمة الدولة)"
+                    className="flex-1 bg-white border border-amber-200 p-3 rounded-xl text-sm focus:outline-none focus:border-amber-500" />
+                  <button onClick={saveSupervisor}
+                    className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white font-bold px-4 rounded-xl text-sm transition-colors">
+                    {supPhoneSaved ? <Check size={16} /> : <Save size={16} />} {supPhoneSaved ? 'تم' : 'حفظ'}
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-2">اتركه فارغاً لتعطيل التنبيهات. التنبيه يُرسَل من نفس هذا الجهاز، فتأكد أنه متصل.</p>
               </div>
 
               {/* Connection actions */}
