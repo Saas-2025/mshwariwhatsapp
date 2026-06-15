@@ -29,12 +29,15 @@ const PlansManager = () => {
     const [loading, setLoading] = useState(true);
     const [savingId, setSavingId] = useState('');
     const [msg, setMsg] = useState('');
+    const [err, setErr] = useState('');
 
     const load = async () => {
+        setErr('');
         try {
             const res = await fetch(`${apiBase()}/api/plans/all`, { headers: { Authorization: `Bearer ${authToken()}` } });
             if (res.ok) setPlans((await res.json()).map((p: any) => ({ ...p, _features: (p.features || []).join('\n') })));
-        } catch { /* ignore */ } finally { setLoading(false); }
+            else setErr(`تعذّر تحميل الباقات (${res.status}). قد يحتاج الخادم لإعادة النشر على Render حتى تظهر نقاط الباقات الجديدة.`);
+        } catch { setErr('تعذّر الاتصال بالخادم.'); } finally { setLoading(false); }
     };
     useEffect(() => { load(); }, []);
 
@@ -51,26 +54,31 @@ const PlansManager = () => {
                 body: JSON.stringify(body),
             });
             if (res.ok) { setMsg(`تم حفظ باقة "${p.name}"`); setTimeout(() => setMsg(''), 2500); }
-        } catch { /* ignore */ } finally { setSavingId(''); }
+            else setErr(`تعذّر حفظ الباقة (${res.status}).`);
+        } catch { setErr('تعذّر الاتصال بالخادم.'); } finally { setSavingId(''); }
     };
 
     const addPlan = async () => {
+        setErr(''); setMsg('');
         try {
             const res = await fetch(`${apiBase()}/api/plans`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken()}` },
                 body: JSON.stringify(emptyDraft()),
             });
-            if (res.ok) load();
-        } catch { /* ignore */ }
+            if (res.ok) { await load(); setMsg('تمت إضافة باقة جديدة — عدّل بياناتها ثم اضغط حفظ'); setTimeout(() => setMsg(''), 3500); }
+            else setErr(`تعذّر إضافة الباقة (${res.status}). تأكد أنك مسجّل كأدمن وأن الخادم محدّث على Render.`);
+        } catch { setErr('تعذّر الاتصال بالخادم.'); }
     };
 
     const del = async (p: any) => {
         if (!window.confirm(`حذف الباقة "${p.name}" نهائياً؟`)) return;
+        setErr('');
         try {
             const res = await fetch(`${apiBase()}/api/plans/${p._id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${authToken()}` } });
             if (res.ok) setPlans(ps => ps.filter(x => x._id !== p._id));
-        } catch { /* ignore */ }
+            else setErr(`تعذّر حذف الباقة (${res.status}).`);
+        } catch { setErr('تعذّر الاتصال بالخادم.'); }
     };
 
     return (
@@ -85,6 +93,7 @@ const PlansManager = () => {
             </div>
 
             {msg && <div className="bg-emerald-50 text-emerald-600 p-3 rounded-xl mb-4 text-sm font-bold flex items-center gap-2"><CheckCircle size={16} /> {msg}</div>}
+            {err && <div className="bg-red-50 text-red-500 p-3 rounded-xl mb-4 text-sm font-bold flex items-center gap-2"><AlertCircle size={16} /> {err}</div>}
 
             {loading ? (
                 <div className="flex justify-center py-10"><div className="animate-spin rounded-full h-7 w-7 border-b-2 border-emerald-500" /></div>
@@ -198,6 +207,7 @@ const Settings = () => {
     const [settingsLoading, setSettingsLoading] = useState(false);
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     const isAdmin = currentUser.role === 'admin';
+    const [tab, setTab] = useState<'account' | 'plans'>('account');
 
     useEffect(() => {
         const fetchSettings = async () => {
@@ -300,14 +310,24 @@ const Settings = () => {
 
     return (
         <div className="max-w-5xl mx-auto space-y-6">
-            <h2 className="text-2xl font-bold text-slate-800">إعدادات الحساب</h2>
+            <h2 className="text-2xl font-bold text-slate-800">الإعدادات</h2>
 
+            {/* Tabs */}
+            <div className="flex gap-1 border-b border-slate-200">
+                <button onClick={() => setTab('account')}
+                    className={`flex items-center gap-2 px-5 py-3 font-bold text-sm border-b-2 -mb-px transition-colors ${tab === 'account' ? 'border-emerald-500 text-emerald-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+                    <Lock size={16} /> الحساب والنظام
+                </button>
+                {isAdmin && (
+                    <button onClick={() => setTab('plans')}
+                        className={`flex items-center gap-2 px-5 py-3 font-bold text-sm border-b-2 -mb-px transition-colors ${tab === 'plans' ? 'border-emerald-500 text-emerald-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+                        <CreditCard size={16} /> الباقات
+                    </button>
+                )}
+            </div>
+
+            {tab === 'account' && (
             <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm max-w-2xl">
-                <h3 className="text-lg font-bold text-slate-700 mb-6 flex items-center gap-2">
-                    <Lock size={20} className="text-emerald-500" />
-                    تغيير كلمة المرور
-                </h3>
-
                 {error && (
                     <div className="bg-red-50 text-red-500 p-3 rounded-xl mb-6 text-sm font-bold flex items-center gap-2">
                         <AlertCircle size={16} /> {error}
@@ -349,6 +369,9 @@ const Settings = () => {
                 </form>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
+                    <h3 className="text-lg font-bold text-slate-700 mb-2 flex items-center gap-2">
+                        <Lock size={20} className="text-emerald-500" /> تغيير كلمة المرور
+                    </h3>
                     <div>
                         <label className="block text-sm font-medium text-slate-500 mb-1">كلمة المرور الحالية</label>
                         <input
@@ -391,8 +414,9 @@ const Settings = () => {
                     </div>
                 </form>
             </div>
+            )}
 
-            {isAdmin && <PlansManager />}
+            {tab === 'plans' && isAdmin && <PlansManager />}
         </div>
     );
 };

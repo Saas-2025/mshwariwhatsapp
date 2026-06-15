@@ -1702,16 +1702,6 @@ app.get('/api/geo', async (req: any, res) => {
     }
 });
 
-// Current logged-in user (safe fields) — used by the subscriptions page
-app.get('/api/me', authenticateToken, async (req: any, res) => {
-    try {
-        const me = await storage.getItem('users', { _id: req.user.userId });
-        if (!me) return res.status(404).json({ error: 'Not found' });
-        delete me.password;
-        res.json(me);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
 // --- Subscription Plans ---
 app.get('/api/plans', authenticateToken, async (req: any, res) => {
     try {
