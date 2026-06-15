@@ -9,6 +9,8 @@ import P from 'pino';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { spawn } from 'child_process';
+import ffmpegStatic from 'ffmpeg-static';
 import NodeCache from 'node-cache';
 import { v4 as uuidv4 } from 'uuid';
 import { storage } from './storage.js';
@@ -29,6 +31,24 @@ const sentMessagesCache = new NodeCache({ stdTTL: 3600, checkperiod: 600 }); // 
 
 // Human takeover: minutes the bot stays silent after the owner replies manually, then auto-resumes.
 const HUMAN_TAKEOVER_MINUTES = Number(process.env.HUMAN_TAKEOVER_MINUTES) || 60;
+
+// Convert recorded audio (e.g. browser webm/opus) to ogg/opus so WhatsApp accepts it as a voice note.
+const transcodeToOggOpus = (input: Buffer): Promise<Buffer> => new Promise((resolve, reject) => {
+  const ffmpegBin = ffmpegStatic as unknown as (string | null);
+  if (!ffmpegBin) return reject(new Error('ffmpeg not available'));
+  const ff = spawn(ffmpegBin, ['-i', 'pipe:0', '-c:a', 'libopus', '-b:a', '32k', '-ar', '48000', '-ac', '1', '-f', 'ogg', 'pipe:1']);
+  const out: Buffer[] = [];
+  const errs: Buffer[] = [];
+  ff.stdout.on('data', (d: Buffer) => out.push(d));
+  ff.stderr.on('data', (d: Buffer) => errs.push(d));
+  ff.on('error', reject);
+  ff.on('close', (code: number) => (code === 0 && out.length)
+    ? resolve(Buffer.concat(out))
+    : reject(new Error('ffmpeg failed: ' + Buffer.concat(errs).toString().slice(-200))));
+  ff.stdin.on('error', () => { /* ignore EPIPE */ });
+  ff.stdin.write(input);
+  ff.stdin.end();
+});
 
 export class WhatsAppEngine {
   private userId: string;
@@ -859,7 +879,19 @@ export class WhatsAppEngine {
   private async sendVoiceAnswer(remoteJid: string, entry: any, quotedMsg: any, saveConvos: boolean) {
     try {
       const base64 = entry.audio.includes(',') ? entry.audio.split(',')[1] : entry.audio;
-      const buffer = Buffer.from(base64, 'base64');
+      let audioBuffer = Buffer.from(base64, 'base64');
+      let mime = entry.audioMime || 'audio/ogg; codecs=opus';
+
+      // WhatsApp voice notes need ogg/opus. Browser recordings are usually webm/opus → transcode.
+      if (!/ogg/i.test(mime)) {
+        try {
+          audioBuffer = await transcodeToOggOpus(audioBuffer);
+          mime = 'audio/ogg; codecs=opus';
+          console.log('[Voice] Transcoded recording to ogg/opus.');
+        } catch (e) {
+          console.error('[Voice] Transcode failed, sending raw audio:', (e as any).message);
+        }
+      }
 
       await new Promise(r => setTimeout(r, 800 + Math.random() * 1200));
       await this.sock.sendPresenceUpdate('recording', remoteJid);
@@ -868,7 +900,7 @@ export class WhatsAppEngine {
 
       const sent = await this.sock.sendMessage(
         remoteJid,
-        { audio: buffer, ptt: true, mimetype: entry.audioMime || 'audio/ogg; codecs=opus' },
+        { audio: audioBuffer, ptt: true, mimetype: mime },
         { quoted: quotedMsg }
       );
       if (sent?.key?.id) {
