@@ -9,6 +9,7 @@ const dict: Record<string, { ar: string; en: string }> = {
   campaigns: { ar: 'إرسال الحملات', en: 'Campaigns' },
   scheduled: { ar: 'جدولة الحملات', en: 'Scheduled' },
   subscriptions: { ar: 'الاشتراكات', en: 'Subscriptions' },
+  support: { ar: 'الدعم الفني', en: 'Support' },
   users: { ar: 'المستخدمين', en: 'Users' },
   settings: { ar: 'الإعدادات', en: 'Settings' },
   logout: { ar: 'تسجيل الخروج', en: 'Log out' },

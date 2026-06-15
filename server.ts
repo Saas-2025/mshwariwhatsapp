@@ -1791,6 +1791,143 @@ app.get('/api/admin/analytics', authenticateToken, requireAdmin, async (req: any
 });
 
 // ============================================================
+// Support tickets — users open tickets, admins manage & reply
+// ============================================================
+const publicMessages = (t: any) => (t.messages || []).map((m: any, i: number) => ({
+    idx: i, from: m.from, text: m.text || '', at: m.at,
+    fileName: m.fileName || null, fileType: m.fileType || null, hasAttachment: !!m.fileData
+}));
+
+// List tickets — user sees own, admin sees all (+ subscription status)
+app.get('/api/support/tickets', authenticateToken, async (req: any, res) => {
+    try {
+        const isAdmin = req.user.role === 'admin';
+        const all = await storage.getItems('support_tickets');
+        let list = (isAdmin ? all : all.filter((t: any) => t.userId === req.user.userId))
+            .sort((a: any, b: any) => (b.lastUpdate || 0) - (a.lastUpdate || 0));
+
+        const usersById: Record<string, any> = {}, plansById: Record<string, any> = {};
+        if (isAdmin) {
+            (await storage.getItems('users')).forEach((u: any) => { usersById[u._id] = u; });
+            (await storage.getItems('plans')).forEach((p: any) => { plansById[p._id] = p; });
+        }
+
+        res.json(list.map((t: any) => {
+            const msgs = t.messages || [];
+            const last = msgs[msgs.length - 1];
+            const base: any = {
+                _id: t._id, subject: t.subject, status: t.status, lastUpdate: t.lastUpdate,
+                messagesCount: msgs.length, lastFrom: last ? last.from : null,
+                lastPreview: last ? (last.text ? String(last.text).slice(0, 80) : (last.fileName ? '📎 ' + last.fileName : '')) : '',
+                createdAt: t.createdAt
+            };
+            if (isAdmin) {
+                const u = usersById[t.userId];
+                const planName = u && u.planId && plansById[u.planId] ? plansById[u.planId].name : '';
+                base.userName = u ? u.name : t.userName;
+                base.username = u ? u.username : t.username;
+                base.userActive = u ? u.isActive !== false : true;
+                base.planName = planName;
+                base.subscribed = !!planName;
+            }
+            return base;
+        }));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// Create a ticket
+app.post('/api/support/tickets', authenticateToken, async (req: any, res) => {
+    try {
+        const { subject, message, fileName, fileType, fileData } = req.body;
+        if (!subject || (!message && !fileData)) return res.status(400).json({ error: 'الموضوع والرسالة مطلوبان' });
+        const me = await storage.getItem('users', { _id: req.user.userId });
+        const now = Math.floor(Date.now() / 1000);
+        const saved = await storage.saveItem('support_tickets', {
+            userId: req.user.userId,
+            userName: me ? me.name : '',
+            username: me ? me.username : '',
+            subject: String(subject).slice(0, 200),
+            status: 'open',
+            lastUpdate: now,
+            messages: [{ from: 'user', text: message || '', fileName, fileType, fileData, at: now }]
+        });
+        res.json({ _id: saved._id, subject: saved.subject, status: saved.status });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// Get one ticket (with messages, attachments stripped)
+app.get('/api/support/tickets/:id', authenticateToken, async (req: any, res) => {
+    try {
+        const t = await storage.getItem('support_tickets', { _id: req.params.id });
+        if (!t) return res.status(404).json({ error: 'Ticket not found' });
+        const isAdmin = req.user.role === 'admin';
+        if (!isAdmin && t.userId !== req.user.userId) return res.status(403).json({ error: 'forbidden' });
+        const extra: any = {};
+        if (isAdmin) {
+            const u = await storage.getItem('users', { _id: t.userId });
+            let planName = '';
+            if (u && u.planId) { const p = await storage.getItem('plans', { _id: u.planId }); if (p) planName = p.name; }
+            extra.userName = u ? u.name : t.userName;
+            extra.username = u ? u.username : t.username;
+            extra.userActive = u ? u.isActive !== false : true;
+            extra.planName = planName;
+            extra.subscribed = !!planName;
+        }
+        res.json({ _id: t._id, subject: t.subject, status: t.status, userId: t.userId, createdAt: t.createdAt, messages: publicMessages(t), ...extra });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// Add a message (user or admin) — optional attachment
+app.post('/api/support/tickets/:id/messages', authenticateToken, async (req: any, res) => {
+    try {
+        const { text, fileName, fileType, fileData } = req.body;
+        if (!text && !fileData) return res.status(400).json({ error: 'الرسالة فارغة' });
+        const t = await storage.getItem('support_tickets', { _id: req.params.id });
+        if (!t) return res.status(404).json({ error: 'Ticket not found' });
+        const isAdmin = req.user.role === 'admin';
+        if (!isAdmin && t.userId !== req.user.userId) return res.status(403).json({ error: 'forbidden' });
+        if (t.status === 'closed') return res.status(400).json({ error: 'التذكرة مغلقة' });
+        const now = Math.floor(Date.now() / 1000);
+        t.messages = t.messages || [];
+        t.messages.push({ from: isAdmin ? 'admin' : 'user', text: text || '', fileName, fileType, fileData, at: now });
+        t.status = isAdmin ? 'answered' : 'open';
+        t.lastUpdate = now;
+        delete t.createdAt; delete t.updatedAt;
+        await storage.saveItem('support_tickets', t);
+        res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// Close (or reopen) a ticket
+app.post('/api/support/tickets/:id/close', authenticateToken, async (req: any, res) => {
+    try {
+        const t = await storage.getItem('support_tickets', { _id: req.params.id });
+        if (!t) return res.status(404).json({ error: 'Ticket not found' });
+        const isAdmin = req.user.role === 'admin';
+        if (!isAdmin && t.userId !== req.user.userId) return res.status(403).json({ error: 'forbidden' });
+        t.status = req.body?.reopen ? 'open' : 'closed';
+        t.lastUpdate = Math.floor(Date.now() / 1000);
+        delete t.createdAt; delete t.updatedAt;
+        await storage.saveItem('support_tickets', t);
+        res.json({ ok: true, status: t.status });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// Download a message attachment
+app.get('/api/support/tickets/:id/messages/:idx/attachment', authenticateToken, async (req: any, res) => {
+    try {
+        const t = await storage.getItem('support_tickets', { _id: req.params.id });
+        if (!t) return res.status(404).json({ error: 'Ticket not found' });
+        if (req.user.role !== 'admin' && t.userId !== req.user.userId) return res.status(403).json({ error: 'forbidden' });
+        const m = (t.messages || [])[parseInt(req.params.idx, 10)];
+        if (!m || !m.fileData) return res.status(404).json({ error: 'No attachment' });
+        res.setHeader('Content-Type', m.fileType || 'application/octet-stream');
+        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(m.fileName || 'attachment')}"`);
+        res.send(Buffer.from(m.fileData, 'base64'));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ============================================================
 // AI Website API — let an external site use a session's AI agent
 // ============================================================
 
