@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UserPlus, User, AlertCircle, Trash2, Edit2, Ban, CheckCircle, X, Shield } from 'lucide-react';
+import { UserPlus, User, AlertCircle, Trash2, Edit2, Ban, CheckCircle, X, Shield, Search, MessageSquare, Send } from 'lucide-react';
 
 const AVAILABLE_PERMISSIONS = [
     { id: 'devices', label: 'الأجهزة (وكل إعداداتها)' },
@@ -73,6 +73,13 @@ const Users = () => {
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
     const [loading, setLoading] = useState(false);
+    const [search, setSearch] = useState('');
+    const [roleFilter, setRoleFilter] = useState<'all' | 'admin' | 'user'>('all');
+
+    const filteredUsers = users.filter(u =>
+        (roleFilter === 'all' || u.role === roleFilter) &&
+        (!search || (u.name || '').toLowerCase().includes(search.toLowerCase()) || (u.username || '').toLowerCase().includes(search.toLowerCase()))
+    );
 
     useEffect(() => { fetchUsers(); }, []);
 
@@ -193,6 +200,21 @@ const Users = () => {
 
             {/* List */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
+                    <div className="relative flex-1 max-w-xs">
+                        <Search size={16} className="absolute right-3 top-3 text-slate-400" />
+                        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="بحث بالاسم أو اسم المستخدم..."
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 pr-9 pl-3 text-sm focus:outline-none focus:border-emerald-500" />
+                    </div>
+                    <div className="inline-flex bg-slate-50 border border-slate-200 rounded-xl p-1">
+                        {(['all', 'admin', 'user'] as const).map(r => (
+                            <button key={r} onClick={() => setRoleFilter(r)}
+                                className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-colors ${roleFilter === r ? 'bg-emerald-500 text-white' : 'text-slate-500'}`}>
+                                {r === 'all' ? 'الكل' : r === 'admin' ? 'أدمن' : 'مستخدم'}
+                            </button>
+                        ))}
+                    </div>
+                </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-right">
                         <thead className="bg-slate-50 text-slate-500 text-sm">
@@ -202,11 +224,13 @@ const Users = () => {
                                 <th className="p-4">الحالة</th>
                                 <th className="p-4">النوع</th>
                                 <th className="p-4">حد الأجهزة</th>
+                                <th className="p-4">المحادثات</th>
+                                <th className="p-4">الرسائل</th>
                                 <th className="p-4">إجراءات</th>
                             </tr>
                         </thead>
                         <tbody className="text-slate-700">
-                            {users.map((user) => (
+                            {filteredUsers.map((user) => (
                                 <tr key={user._id} className="border-t border-slate-50 hover:bg-slate-50/50">
                                     <td className="p-4 font-bold flex items-center gap-2">
                                         <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center"><User size={16} /></div>
@@ -220,6 +244,12 @@ const Users = () => {
                                         <span className={`px-2 py-1 rounded text-xs font-bold ${user.role === 'admin' ? 'bg-purple-100 text-purple-600' : 'bg-slate-100 text-slate-600'}`}>{user.role === 'admin' ? 'أدمن' : 'مستخدم'}</span>
                                     </td>
                                     <td className="p-4 text-sm">{user.role === 'admin' ? '∞' : (user.maxSessions ? user.maxSessions : 'بلا حد')}</td>
+                                    <td className="p-4">
+                                        <span className="inline-flex items-center gap-1 text-sm text-slate-600"><MessageSquare size={14} className="text-emerald-500" /> {user.conversationCount ?? 0}</span>
+                                    </td>
+                                    <td className="p-4">
+                                        <span className="inline-flex items-center gap-1 text-sm text-slate-600"><Send size={14} className="text-blue-500" /> {user.messageCount ?? 0}</span>
+                                    </td>
                                     <td className="p-4 flex gap-2">
                                         <button onClick={() => handleEditClick(user)} className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="تعديل"><Edit2 size={18} /></button>
                                         <button onClick={() => toggleSuspend(user)} className={`p-2 rounded-lg ${user.isActive ? 'text-amber-500 hover:bg-amber-50' : 'text-green-500 hover:bg-green-50'}`} title={user.isActive ? 'إيقاف الحساب' : 'تفعيل الحساب'}>{user.isActive ? <Ban size={18} /> : <CheckCircle size={18} />}</button>
@@ -227,7 +257,7 @@ const Users = () => {
                                     </td>
                                 </tr>
                             ))}
-                            {users.length === 0 && <tr><td colSpan={6} className="p-8 text-center text-slate-400">لا يوجد مستخدمين</td></tr>}
+                            {filteredUsers.length === 0 && <tr><td colSpan={8} className="p-8 text-center text-slate-400">لا يوجد مستخدمين مطابقين</td></tr>}
                         </tbody>
                     </table>
                 </div>

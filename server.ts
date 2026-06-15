@@ -283,13 +283,26 @@ app.get('/api/users', authenticateToken, requireAdmin, async (req: any, res) => 
     console.log('--> GET /api/users REQUEST');
     try {
         const users = await storage.getItems('users');
-        console.log(`--> Found ${users.length} users`);
         const safeUsers = users.map((u: any) => {
             const { password, ...rest } = u;
             return rest;
         });
+
+        // Per-user conversation + message counts (from ChatLog)
+        const agg = await ChatLog.aggregate([
+            { $group: { _id: '$userId', messages: { $sum: 1 }, chats: { $addToSet: '$remoteJid' } } }
+        ]);
+        const counts: Record<string, { messages: number; conversations: number }> = {};
+        agg.forEach((a: any) => { if (a._id) counts[a._id] = { messages: a.messages, conversations: (a.chats || []).length }; });
+
+        const enriched = safeUsers.map((u: any) => ({
+            ...u,
+            messageCount: counts[u._id]?.messages || 0,
+            conversationCount: counts[u._id]?.conversations || 0
+        }));
+
         // Sort by date (newest first)
-        res.json(safeUsers.sort((a: any, b: any) => {
+        res.json(enriched.sort((a: any, b: any) => {
             const dateA = new Date(a.createdAt || 0).getTime();
             const dateB = new Date(b.createdAt || 0).getTime();
             return dateB - dateA;
@@ -1150,6 +1163,89 @@ app.get('/api/sessions/:sessionId/conversations/:jid', authenticateToken, async 
     }
 });
 
+// Per-conversation settings (disable AI for this customer / custom prompt)
+app.get('/api/sessions/:sessionId/chat-settings/:jid', authenticateToken, async (req: any, res) => {
+    const { sessionId, jid } = req.params;
+    const session = SessionService.getSession(sessionId);
+    if (!session || (session.userId !== req.user.userId && req.user.role !== 'admin')) {
+        return res.status(404).json({ error: 'Session not found or access denied' });
+    }
+    const remoteJid = decodeURIComponent(jid);
+    const cfg = await storage.getItem('chat_settings', { sessionId, remoteJid });
+    res.json({ aiDisabled: !!(cfg && cfg.aiDisabled), customPrompt: (cfg && cfg.customPrompt) || '' });
+});
+
+app.put('/api/sessions/:sessionId/chat-settings/:jid', authenticateToken, async (req: any, res) => {
+    const { sessionId, jid } = req.params;
+    const session = SessionService.getSession(sessionId);
+    if (!session || (session.userId !== req.user.userId && req.user.role !== 'admin')) {
+        return res.status(404).json({ error: 'Session not found or access denied' });
+    }
+    try {
+        const remoteJid = decodeURIComponent(jid);
+        const { aiDisabled, customPrompt } = req.body;
+        const existing: any = await storage.getItem('chat_settings', { sessionId, remoteJid }) || { sessionId, remoteJid };
+        if (aiDisabled !== undefined) existing.aiDisabled = !!aiDisabled;
+        if (customPrompt !== undefined) existing.customPrompt = String(customPrompt).slice(0, 4000);
+        await storage.saveItem('chat_settings', existing);
+        res.json({ success: true, aiDisabled: !!existing.aiDisabled, customPrompt: existing.customPrompt || '' });
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Delete a whole conversation from the dashboard
+app.delete('/api/sessions/:sessionId/conversations/:jid', authenticateToken, async (req: any, res) => {
+    const { sessionId, jid } = req.params;
+    const session = SessionService.getSession(sessionId);
+    if (!session || (session.userId !== req.user.userId && req.user.role !== 'admin')) {
+        return res.status(404).json({ error: 'Session not found or access denied' });
+    }
+    try {
+        const remoteJid = decodeURIComponent(jid);
+        await ChatLog.deleteMany({ sessionId, remoteJid });
+        res.json({ success: true });
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Send a message / attachment to a customer from the dashboard
+app.post('/api/sessions/:sessionId/conversations/:jid/send', authenticateToken, async (req: any, res) => {
+    const { sessionId, jid } = req.params;
+    const session = SessionService.getSession(sessionId);
+    if (!session || (session.userId !== req.user.userId && req.user.role !== 'admin')) {
+        return res.status(404).json({ error: 'Session not found or access denied' });
+    }
+    try {
+        const remoteJid = decodeURIComponent(jid);
+        const { type = 'text', content, caption } = req.body;
+        if (!content) return res.status(400).json({ error: 'Missing content' });
+
+        if (remoteJid.startsWith('fb:')) {
+            const conn = await storage.getItem('facebook', { sessionId });
+            if (!conn || !conn.pageAccessToken) return res.status(400).json({ error: 'صفحة فيسبوك غير مربوطة' });
+            if (type !== 'text') return res.status(400).json({ error: 'الإرسال من اللوحة لفيسبوك يدعم النص فقط حالياً' });
+            await fbSendMessage(conn.pageAccessToken, remoteJid.slice(3), content);
+        } else {
+            if (session.engine.currentStatus !== 'CONNECTED') {
+                return res.status(400).json({ error: 'الجهاز غير متصل' });
+            }
+            await session.engine.send(remoteJid, type, content, caption);
+        }
+
+        const logText = type === 'text' ? content : (caption || `[${type}]`);
+        await ChatLog.create({
+            sessionId, userId: session.userId, remoteJid, role: 'assistant',
+            text: String(logText).slice(0, 4000), source: 'manual', timestamp: Math.floor(Date.now() / 1000)
+        });
+        res.json({ success: true });
+    } catch (e: any) {
+        console.error('[Conversations] send error:', e);
+        res.status(500).json({ error: e.message || 'Failed to send' });
+    }
+});
+
 // Response analytics for a session
 app.get('/api/sessions/:sessionId/analytics', authenticateToken, async (req: any, res) => {
     const { sessionId } = req.params;
@@ -1382,12 +1478,16 @@ const fbReplyToComment = async (token: string, commentId: string, message: strin
 const fbGenerateReply = async (sessionId: string, remoteJid: string, userText: string, extra?: string, useMemory = true): Promise<string | null> => {
     const agent = await storage.getItem('aiagent', { sessionId });
     if (!agent || !agent.isActive) return null;
+    const chatCfg = await storage.getItem('chat_settings', { sessionId, remoteJid });
+    if (chatCfg && chatCfg.aiDisabled) return null; // AI disabled for this customer
     let history: { role: string; text: string }[] = [];
     if (useMemory) {
         const rows = await ChatLog.find({ sessionId, remoteJid }).sort({ timestamp: -1 }).limit(12).lean();
         history = rows.reverse().map((r: any) => ({ role: r.role, text: r.text }));
     }
-    const agentForReply = extra ? { ...agent, systemPrompt: `${agent.systemPrompt || ''}\n${extra}` } : agent;
+    let systemExtra = extra || '';
+    if (chatCfg && chatCfg.customPrompt) systemExtra += `\n\nتعليمات خاصة لهذا العميل تحديداً:\n${chatCfg.customPrompt}`;
+    const agentForReply = systemExtra ? { ...agent, systemPrompt: `${agent.systemPrompt || ''}\n${systemExtra}` } : agent;
     return await getAIResponse(agentForReply as any, userText, history as any);
 };
 

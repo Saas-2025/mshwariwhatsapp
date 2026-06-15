@@ -457,7 +457,9 @@ export class WhatsAppEngine {
                 // Resolve the per-session AI agent and build memory BEFORE logging the
                 // current turn, so the prompt history doesn't duplicate it.
                 const agent = await this.getSessionAgent();
-                const aiActive = !!(agent && agent.isActive);
+                const chatCfg = await storage.getItem('chat_settings', { sessionId: this.sessionId, remoteJid });
+                const aiBlocked = !!(chatCfg && chatCfg.aiDisabled);
+                const aiActive = !!(agent && agent.isActive) && !aiBlocked;
                 const history = (aiActive && saveConvos) ? await this.buildHistory(remoteJid) : [];
 
                 // Record the inbound message (skipped if saving is disabled for this session)
@@ -467,10 +469,15 @@ export class WhatsAppEngine {
                   console.log(`[Reply] SKIP ${remoteJid}: auto-reply is OFF for this session (master switch "التشغيل العام").`);
                 } else if (isMuted) {
                   console.log(`[Reply] SKIP ${remoteJid}: human takeover active — bot paused, auto-resumes within ${HUMAN_TAKEOVER_MINUTES} min (or send #bot).`);
+                } else if (aiBlocked) {
+                  console.log(`[Reply] SKIP ${remoteJid}: AI disabled for this customer (per-chat setting).`);
                 } else if (aiActive) {
                   // 1) AI Agent is the PRIMARY responder (knowledge base + conversation memory)
                   try {
-                    const aiReply = await getAIResponse(agent as any, textContent, history);
+                    const agentForReply = (chatCfg && chatCfg.customPrompt)
+                      ? { ...(agent as any), systemPrompt: `${(agent as any).systemPrompt || ''}\n\nتعليمات خاصة لهذا العميل تحديداً (لها الأولوية):\n${chatCfg.customPrompt}` }
+                      : agent;
+                    const aiReply = await getAIResponse(agentForReply as any, textContent, history);
                     if (aiReply) {
                       await new Promise(r => setTimeout(r, 800 + Math.random() * 1500));
                       await this.sock.sendPresenceUpdate('composing', remoteJid);
@@ -661,7 +668,7 @@ export class WhatsAppEngine {
   async send(to: string, type: 'text' | 'image' | 'audio' | 'video' | 'document', content: string, caption?: string) {
     if (this.status !== 'CONNECTED' || !this.sock) throw new Error("Device is not connected!");
 
-    const jid = to.includes('@s.whatsapp.net') ? to : `${to}@s.whatsapp.net`;
+    const jid = to.includes('@') ? to : `${to}@s.whatsapp.net`;
     console.log(`[API] Sending ${type} to ${to}...`);
 
     try {

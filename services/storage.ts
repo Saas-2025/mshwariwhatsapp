@@ -1,5 +1,5 @@
 import { connectDB } from './db.js';
-import { User, Session, Contact, Message, MutedChat, Setting, ScheduledCampaign, AuthState, AIAgent, ChatLog, FacebookConnection } from '../models/index.js';
+import { User, Session, Contact, Message, MutedChat, Setting, ScheduledCampaign, AuthState, AIAgent, ChatLog, FacebookConnection, ChatSettings } from '../models/index.js';
 import { AutoReply } from '../models/AutoReply.js';
 
 class MongoStorage {
@@ -32,6 +32,7 @@ class MongoStorage {
             case 'aiagent': return AIAgent;
             case 'chatlog': return ChatLog;
             case 'facebook': return FacebookConnection;
+            case 'chat_settings': return ChatSettings;
             default: throw new Error(`Unknown collection: ${collection}`);
         }
     }
@@ -80,6 +81,8 @@ class MongoStorage {
             filter = { userId: item.userId, sessionId: item.sessionId ?? null };
         } else if (collection === 'facebook' && item.sessionId) {
             filter = { sessionId: item.sessionId };
+        } else if (collection === 'chat_settings' && item.sessionId && item.remoteJid) {
+            filter = { sessionId: item.sessionId, remoteJid: item.remoteJid };
         } else {
             // New item without ID, just create
             const newItem = await Model.create(item);
