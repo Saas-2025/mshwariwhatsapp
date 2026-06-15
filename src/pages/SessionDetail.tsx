@@ -53,6 +53,8 @@ const SessionDetail: React.FC<{ socket: any }> = ({ socket }) => {
   const [settings, setSettings] = useState<{ autoReplyEnabled: boolean; saveConversations: boolean; supervisorPhone: string }>({ autoReplyEnabled: true, saveConversations: true, supervisorPhone: '' });
   const [supPhoneSaved, setSupPhoneSaved] = useState(false);
   const [aiKey, setAiKey] = useState('');
+  const me = JSON.parse(localStorage.getItem('user') || '{}');
+  const canSaveConv = me.role === 'admin' || (me.permissions || []).includes('save_conversations');
 
   useEffect(() => {
     if (!socket) return;
@@ -267,19 +269,21 @@ const SessionDetail: React.FC<{ socket: any }> = ({ socket }) => {
                 </button>
               </div>
 
-              {/* Save conversations (privacy) */}
-              <div className={`flex items-center justify-between rounded-xl p-4 border ${settings.saveConversations ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'}`}>
-                <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${settings.saveConversations ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-400'}`}><MessageSquare size={20} /></div>
-                  <div>
-                    <p className="font-bold text-slate-700">حفظ المحادثات</p>
-                    <p className="text-xs text-slate-400">{settings.saveConversations ? 'يتم حفظ المحادثات (سجل + تحليلات + ذاكرة الـ AI)' : 'لا يتم حفظ محادثات هذا الجهاز — بدون سجل أو تحليلات أو ذاكرة (خصوصية)'}</p>
+              {/* Save conversations (privacy) — gated by the 'save_conversations' permission */}
+              {canSaveConv && (
+                <div className={`flex items-center justify-between rounded-xl p-4 border ${settings.saveConversations ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'}`}>
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${settings.saveConversations ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-400'}`}><MessageSquare size={20} /></div>
+                    <div>
+                      <p className="font-bold text-slate-700">حفظ المحادثات</p>
+                      <p className="text-xs text-slate-400">{settings.saveConversations ? 'يتم حفظ المحادثات (سجل + تحليلات + ذاكرة الـ AI)' : 'لا يتم حفظ محادثات هذا الجهاز — بدون سجل أو تحليلات أو ذاكرة (خصوصية)'}</p>
+                    </div>
                   </div>
+                  <button onClick={() => updateSetting({ saveConversations: !settings.saveConversations })} className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${settings.saveConversations ? 'bg-blue-600' : 'bg-slate-300'}`}>
+                    <span className={`inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform ${settings.saveConversations ? 'translate-x-1' : 'translate-x-6'}`} />
+                  </button>
                 </div>
-                <button onClick={() => updateSetting({ saveConversations: !settings.saveConversations })} className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${settings.saveConversations ? 'bg-blue-600' : 'bg-slate-300'}`}>
-                  <span className={`inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform ${settings.saveConversations ? 'translate-x-1' : 'translate-x-6'}`} />
-                </button>
-              </div>
+              )}
 
               {/* Supervisor phone for human-takeover alerts */}
               <div className="rounded-xl p-4 border border-amber-200 bg-amber-50/60">

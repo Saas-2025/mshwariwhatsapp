@@ -6,6 +6,7 @@ const AVAILABLE_PERMISSIONS = [
     { id: 'campaigns', label: 'إرسال الحملات' },
     { id: 'scheduled_campaigns', label: 'جدولة الحملات' },
     { id: 'api_access', label: 'الربط البرمجي (API)' },
+    { id: 'save_conversations', label: 'التحكم في حفظ المحادثات' },
 ];
 
 interface FormShape {

@@ -808,7 +808,16 @@ app.put('/api/sessions/:sessionId/settings', authenticateToken, async (req: any,
         const { autoReplyEnabled, saveConversations, supervisorPhone } = req.body;
         const updated: any = { ...session };
         if (autoReplyEnabled !== undefined) updated.autoReplyEnabled = !!autoReplyEnabled;
-        if (saveConversations !== undefined) updated.saveConversations = !!saveConversations;
+        if (saveConversations !== undefined) {
+            // Gated by permission: admins always; users need 'save_conversations'
+            let allowed = req.user.role === 'admin';
+            if (!allowed) {
+                const me = await storage.getItem('users', { _id: req.user.userId });
+                allowed = !!(me && (me.permissions || []).includes('save_conversations'));
+            }
+            if (!allowed) return res.status(403).json({ error: 'لا تملك صلاحية التحكم في حفظ المحادثات' });
+            updated.saveConversations = !!saveConversations;
+        }
         if (supervisorPhone !== undefined) updated.supervisorPhone = String(supervisorPhone).replace(/[^\d]/g, '');
         if (updated._id) delete updated._id;
         delete updated.createdAt;
