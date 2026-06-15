@@ -1585,7 +1585,9 @@ app.get('/api/dashboard', authenticateToken, async (req: any, res) => {
         const sessionIds = sessions.map(s => s.id);
         const connected = sessions.filter(s => s.engine.currentStatus === 'CONNECTED').length;
 
-        const since24 = Math.floor(Date.now() / 1000) - 24 * 3600;
+        const nowSec = Math.floor(Date.now() / 1000);
+        const since24 = nowSec - 24 * 3600;
+        const since7d = nowSec - 7 * 24 * 3600;
         const match: any = sessionIds.length ? { sessionId: { $in: sessionIds } } : { sessionId: '__none__' };
         const totalsAgg = await ChatLog.aggregate([
             { $match: match },
@@ -1595,13 +1597,27 @@ app.get('/api/dashboard', authenticateToken, async (req: any, res) => {
                     messages: { $sum: 1 },
                     incoming: { $sum: { $cond: [{ $eq: ['$role', 'user'] }, 1, 0] } },
                     replies: { $sum: { $cond: [{ $eq: ['$role', 'assistant'] }, 1, 0] } },
-                    aiReplies: { $sum: { $cond: [{ $eq: ['$source', 'ai'] }, 1, 0] } },
+                    aiReplies: { $sum: { $cond: [{ $and: [{ $eq: ['$role', 'assistant'] }, { $eq: ['$source', 'ai'] }] }, 1, 0] } },
+                    keywordReplies: { $sum: { $cond: [{ $and: [{ $eq: ['$role', 'assistant'] }, { $eq: ['$source', 'keyword'] }] }, 1, 0] } },
+                    manualReplies: { $sum: { $cond: [{ $and: [{ $eq: ['$role', 'assistant'] }, { $eq: ['$source', 'manual'] }] }, 1, 0] } },
                     today: { $sum: { $cond: [{ $gte: ['$timestamp', since24] }, 1, 0] } }
                 }
             }
         ]);
-        const t = totalsAgg[0] || { messages: 0, incoming: 0, replies: 0, aiReplies: 0, today: 0 };
+        const t = totalsAgg[0] || { messages: 0, incoming: 0, replies: 0, aiReplies: 0, keywordReplies: 0, manualReplies: 0, today: 0 };
         const uniqueChats = sessionIds.length ? (await ChatLog.distinct('remoteJid', match)).length : 0;
+
+        const daily = await ChatLog.aggregate([
+            { $match: { ...match, timestamp: { $gte: since7d } } },
+            {
+                $group: {
+                    _id: { $dateToString: { format: '%Y-%m-%d', date: { $toDate: { $multiply: ['$timestamp', 1000] } } } },
+                    incoming: { $sum: { $cond: [{ $eq: ['$role', 'user'] }, 1, 0] } },
+                    replies: { $sum: { $cond: [{ $eq: ['$role', 'assistant'] }, 1, 0] } }
+                }
+            },
+            { $sort: { _id: 1 } }
+        ]);
 
         const firstSession = sessions[0];
         let hasAgent = false, hasKnowledge = false, hasGroq = !!process.env.GROQ_API_KEY;
@@ -1621,6 +1637,8 @@ app.get('/api/dashboard', authenticateToken, async (req: any, res) => {
             replies: t.replies,
             aiReplies: t.aiReplies,
             today: t.today,
+            daily: daily.map((d: any) => ({ date: d._id, incoming: d.incoming, replies: d.replies })),
+            replyBreakdown: { ai: t.aiReplies, keyword: t.keywordReplies, manual: t.manualReplies },
             onboarding: { hasDevice: sessions.length > 0, hasConnected: connected > 0, hasAgent, hasGroq, hasKnowledge }
         });
     } catch (e: any) {

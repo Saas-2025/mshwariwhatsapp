@@ -542,6 +542,7 @@ const AIAgentPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
             )}
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {/* Voice answer recording */}
           <div className="border-2 border-dashed border-amber-200 bg-amber-50/40 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-2">
@@ -604,6 +605,8 @@ const AIAgentPanel: React.FC<{ sessionId: string }> = ({ sessionId }) => {
                 <Save size={15} /> {attBusy ? 'جاري الحفظ...' : 'حفظ'}
               </button>
             </div>
+          </div>
+
           </div>
 
           <div className="flex items-center gap-2 text-xs text-slate-400">

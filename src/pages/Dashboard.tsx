@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Smartphone, MessageSquare, Send, Bot, Inbox, Activity, CheckCircle2, Circle, ArrowLeft } from 'lucide-react';
+import { Smartphone, MessageSquare, Send, Bot, Inbox, Activity, BarChart3, PieChart } from 'lucide-react';
 
 const baseUrl = () => (import.meta.env.VITE_API_URL || 'http://localhost:3050').replace(/\/$/, '');
 
 const Dashboard = () => {
-  const navigate = useNavigate();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -28,21 +26,21 @@ const Dashboard = () => {
     { icon: <Activity size={20} />, label: 'رسائل آخر 24 ساعة', value: data.today, color: 'bg-rose-100 text-rose-600' },
   ] : [];
 
-  const steps = data ? [
-    { done: data.onboarding.hasDevice, label: 'أضف جهازاً جديداً', to: '/devices' },
-    { done: data.onboarding.hasConnected, label: 'اربط واتساب (امسح كود QR)', to: '/devices' },
-    { done: data.onboarding.hasGroq, label: 'أضف مفتاح Groq للذكاء الاصطناعي', to: '/devices' },
-    { done: data.onboarding.hasAgent, label: 'فعّل المساعد الذكي', to: '/devices' },
-    { done: data.onboarding.hasKnowledge, label: 'أضف قاعدة معرفة', to: '/devices' },
-  ] : [];
-  const allDone = steps.length > 0 && steps.every(s => s.done);
-  const doneCount = steps.filter(s => s.done).length;
+  const daily: { date: string; incoming: number; replies: number }[] = data?.daily || [];
+  const maxDaily = Math.max(1, ...daily.map(d => Math.max(d.incoming, d.replies)));
+  const bd = data?.replyBreakdown || { ai: 0, keyword: 0, manual: 0 };
+  const bdTotal = Math.max(1, bd.ai + bd.keyword + bd.manual);
+  const seg = [
+    { label: 'ذكاء اصطناعي', value: bd.ai, cls: 'bg-purple-500', text: 'text-purple-600' },
+    { label: 'كلمات مفتاحية', value: bd.keyword, cls: 'bg-amber-500', text: 'text-amber-600' },
+    { label: 'يدوي', value: bd.manual, cls: 'bg-blue-500', text: 'text-blue-600' },
+  ];
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-slate-800">مرحباً، {user.name || 'مستخدم'} 👋</h2>
-        <p className="text-slate-500 text-sm">نظرة عامة على نشاطك</p>
+        <p className="text-slate-500 text-sm">نظرة عامة على نشاطك{user.role !== 'admin' ? ' (أرقامك أنت فقط)' : ''}</p>
       </div>
 
       {loading ? (
@@ -62,32 +60,49 @@ const Dashboard = () => {
             ))}
           </div>
 
-          {!allDone && (
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-              <div className="flex items-center justify-between mb-1">
-                <h3 className="font-bold text-slate-700">خطوات البدء</h3>
-                <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">{doneCount}/{steps.length}</span>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* 7-day bars */}
+            <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+              <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><BarChart3 size={18} className="text-emerald-500" /> النشاط — آخر 7 أيام</h3>
+              {daily.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-12">لا توجد بيانات بعد.</p>
+              ) : (
+                <div className="flex items-end justify-around gap-2 h-56">
+                  {daily.map(d => (
+                    <div key={d.date} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
+                      <div className="flex items-end gap-1 h-full">
+                        <div className="w-3.5 bg-blue-400 rounded-t" style={{ height: `${(d.incoming / maxDaily) * 100}%` }} title={`واردة: ${d.incoming}`} />
+                        <div className="w-3.5 bg-emerald-500 rounded-t" style={{ height: `${(d.replies / maxDaily) * 100}%` }} title={`ردود: ${d.replies}`} />
+                      </div>
+                      <span className="text-[10px] text-slate-400 whitespace-nowrap">{d.date.slice(5)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center justify-center gap-6 mt-4 text-xs text-slate-500">
+                <span className="flex items-center gap-1"><span className="w-3 h-3 bg-blue-400 rounded" /> واردة</span>
+                <span className="flex items-center gap-1"><span className="w-3 h-3 bg-emerald-500 rounded" /> ردود</span>
               </div>
-              <p className="text-xs text-slate-400 mb-4">أكمل الخطوات لتشغيل البوت بالكامل</p>
-              <div className="space-y-2">
-                {steps.map((s, i) => (
-                  <button key={i} onClick={() => navigate(s.to)}
-                    className={`w-full flex items-center gap-3 p-3 rounded-xl border text-right transition-colors ${s.done ? 'bg-emerald-50/50 border-emerald-100' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'}`}>
-                    {s.done ? <CheckCircle2 size={20} className="text-emerald-500 shrink-0" /> : <Circle size={20} className="text-slate-300 shrink-0" />}
-                    <span className={`flex-1 text-sm font-bold ${s.done ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{s.label}</span>
-                    {!s.done && <ArrowLeft size={16} className="text-slate-400" />}
-                  </button>
+            </div>
+
+            {/* Reply sources */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+              <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><PieChart size={18} className="text-emerald-500" /> مصادر الردود</h3>
+              <div className="flex h-4 rounded-full overflow-hidden bg-slate-100 mb-4">
+                {seg.map((s, i) => s.value > 0 && (
+                  <div key={i} className={s.cls} style={{ width: `${(s.value / bdTotal) * 100}%` }} title={`${s.label}: ${s.value}`} />
+                ))}
+              </div>
+              <div className="space-y-3">
+                {seg.map((s, i) => (
+                  <div key={i} className="flex items-center justify-between text-sm">
+                    <span className="flex items-center gap-2 text-slate-600"><span className={`w-3 h-3 rounded ${s.cls}`} /> {s.label}</span>
+                    <span className={`font-bold ${s.text}`}>{s.value} <span className="text-slate-400 text-xs">({Math.round((s.value / bdTotal) * 100)}%)</span></span>
+                  </div>
                 ))}
               </div>
             </div>
-          )}
-
-          {allDone && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 flex items-center gap-3">
-              <CheckCircle2 size={24} className="text-emerald-500" />
-              <p className="text-emerald-700 font-bold text-sm">إعدادك مكتمل — البوت جاهز ويعمل! 🎉</p>
-            </div>
-          )}
+          </div>
         </>
       )}
     </div>
