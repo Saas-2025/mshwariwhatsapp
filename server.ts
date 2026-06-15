@@ -1730,6 +1730,66 @@ app.delete('/api/plans/:id', authenticateToken, requireAdmin, async (req: any, r
     catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// Admin-only analytics: users, subscribers, plans distribution, revenue estimate, growth
+app.get('/api/admin/analytics', authenticateToken, requireAdmin, async (req: any, res) => {
+    try {
+        const users = await storage.getItems('users');
+        const plans = await storage.getItems('plans');
+        const planById: Record<string, any> = {};
+        plans.forEach((p: any) => { planById[p._id] = p; });
+
+        const nonAdmin = users.filter((u: any) => u.role !== 'admin');
+        const subscribers = nonAdmin.filter((u: any) => u.planId && planById[u.planId]);
+
+        const totalUsers = users.length;
+        const activeUsers = users.filter((u: any) => u.isActive !== false).length;
+        const adminUsers = users.filter((u: any) => u.role === 'admin').length;
+        const withoutPlan = nonAdmin.length - subscribers.length;
+
+        // Subscribers per plan (+ revenue contribution)
+        const perPlan = plans
+            .map((p: any) => {
+                const count = subscribers.filter((u: any) => u.planId === p._id).length;
+                return { name: p.name, popular: !!p.popular, order: p.order || 0, count, priceMonthly: Number(p.priceMonthly) || 0, currency: p.currency || 'ج.م' };
+            })
+            .sort((a: any, b: any) => a.order - b.order);
+
+        // Estimated monthly recurring revenue (EG reference + SA reference)
+        let mrrEG = 0, mrrSA = 0;
+        subscribers.forEach((u: any) => { const p = planById[u.planId]; if (p) { mrrEG += Number(p.priceMonthly) || 0; mrrSA += Number(p.priceMonthlySA) || 0; } });
+
+        // New users over the last 6 months
+        const now = new Date();
+        const months: { key: string; label: string; count: number }[] = [];
+        const idx: Record<string, number> = {};
+        for (let i = 5; i >= 0; i--) {
+            const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+            const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            idx[key] = months.length;
+            months.push({ key, label: key.slice(2), count: 0 });
+        }
+        users.forEach((u: any) => {
+            if (!u.createdAt) return;
+            const k = new Date(u.createdAt).toISOString().slice(0, 7);
+            if (idx[k] !== undefined) months[idx[k]].count++;
+        });
+
+        const sessions = SessionService.getAllSessions();
+        const connectedDevices = sessions.filter((s: any) => s.engine.currentStatus === 'CONNECTED').length;
+
+        res.json({
+            totalUsers, activeUsers, adminUsers,
+            subscribersCount: subscribers.length, withoutPlan, plansCount: plans.length,
+            perPlan, mrrEG, mrrSA,
+            growth: months,
+            totalDevices: sessions.length, connectedDevices
+        });
+    } catch (e: any) {
+        console.error('[Admin analytics] error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // ============================================================
 // AI Website API — let an external site use a session's AI agent
 // ============================================================
