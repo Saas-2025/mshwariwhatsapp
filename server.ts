@@ -29,6 +29,9 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
+// Behind Render/Vercel proxies — trust X-Forwarded-* so req.ip is the real client IP
+app.set('trust proxy', true);
+
 // CORS must be the FIRST middleware so every route — including the preflight
 // OPTIONS request the browser sends before login — gets the CORS headers.
 // origin: true reflects the caller's origin (works for the Vercel frontend).
@@ -136,9 +139,9 @@ const seedPlans = async () => {
         const existing = await storage.getItems('plans');
         if (existing.length > 0) return;
         const defaults = [
-            { name: 'مجانية', priceMonthly: 0, priceYearly: 0, currency: 'ج.م', maxSessions: 1, maxConversations: 100, maxCampaignMessages: 200, maxScheduled: 1, features: ['جهاز واحد', 'رد آلي بالذكاء الاصطناعي', 'قواعد معرفة أساسية'], popular: false, order: 1, isActive: true },
-            { name: 'احترافية', priceMonthly: 299, priceYearly: 2990, currency: 'ج.م', maxSessions: 3, maxConversations: 2000, maxCampaignMessages: 10000, maxScheduled: 10, features: ['3 أجهزة', 'كل مميزات الذكاء الاصطناعي', 'تكامل فيسبوك', 'تحليلات متقدمة', 'دعم أولوية'], popular: true, order: 2, isActive: true },
-            { name: 'أعمال', priceMonthly: 799, priceYearly: 7990, currency: 'ج.م', maxSessions: 10, maxConversations: 0, maxCampaignMessages: 0, maxScheduled: 0, features: ['10 أجهزة', 'محادثات وحملات بلا حدود', 'API للموقع الإلكتروني', 'مستخدمون متعددون', 'دعم مخصص'], popular: false, order: 3, isActive: true }
+            { name: 'مجانية', priceMonthly: 0, priceYearly: 0, currency: 'ج.م', priceMonthlySA: 0, priceYearlySA: 0, currencySA: 'ر.س', maxSessions: 1, maxConversations: 100, maxCampaignMessages: 200, maxScheduled: 1, features: ['جهاز واحد', 'رد آلي بالذكاء الاصطناعي', 'قواعد معرفة أساسية'], popular: false, order: 1, isActive: true },
+            { name: 'احترافية', priceMonthly: 299, priceYearly: 2990, currency: 'ج.م', priceMonthlySA: 49, priceYearlySA: 490, currencySA: 'ر.س', maxSessions: 3, maxConversations: 2000, maxCampaignMessages: 10000, maxScheduled: 10, features: ['3 أجهزة', 'كل مميزات الذكاء الاصطناعي', 'تكامل فيسبوك', 'تحليلات متقدمة', 'دعم أولوية'], popular: true, order: 2, isActive: true },
+            { name: 'أعمال', priceMonthly: 799, priceYearly: 7990, currency: 'ج.م', priceMonthlySA: 129, priceYearlySA: 1290, currencySA: 'ر.س', maxSessions: 10, maxConversations: 0, maxCampaignMessages: 0, maxScheduled: 0, features: ['10 أجهزة', 'محادثات وحملات بلا حدود', 'API للموقع الإلكتروني', 'مستخدمون متعددون', 'دعم مخصص'], popular: false, order: 3, isActive: true }
         ];
         for (const p of defaults) await storage.saveItem('plans', p);
         console.log('--> Seeded default subscription plans.');
@@ -1662,12 +1665,40 @@ app.get('/api/dashboard', authenticateToken, async (req: any, res) => {
             daily: daily.map((d: any) => ({ date: d._id, incoming: d.incoming, replies: d.replies })),
             replyBreakdown: { ai: t.aiReplies, keyword: t.keywordReplies, manual: t.manualReplies },
             onboarding: { hasDevice: sessions.length > 0, hasConnected: connected > 0, hasAgent, hasGroq, hasKnowledge },
-            plan: plan ? { name: plan.name, priceMonthly: plan.priceMonthly, currency: plan.currency, maxSessions: plan.maxSessions, maxConversations: plan.maxConversations, maxCampaignMessages: plan.maxCampaignMessages, maxScheduled: plan.maxScheduled, features: plan.features } : null,
+            plan: plan ? { name: plan.name, priceMonthly: plan.priceMonthly, priceYearly: plan.priceYearly, currency: plan.currency, priceMonthlySA: plan.priceMonthlySA, priceYearlySA: plan.priceYearlySA, currencySA: plan.currencySA, maxSessions: plan.maxSessions, maxConversations: plan.maxConversations, maxCampaignMessages: plan.maxCampaignMessages, maxScheduled: plan.maxScheduled, features: plan.features } : null,
             usage: { devices: sessions.length, conversations: uniqueChats, messages: t.messages }
         });
     } catch (e: any) {
         console.error('[Dashboard] error:', e);
         res.status(500).json({ error: e.message });
+    }
+});
+
+// Geo-detect the visitor's pricing region from their IP (EG = Egypt, SA = everywhere else).
+// Cached per-IP in memory; falls back to EG if lookup fails.
+const geoCache = new Map<string, { region: string; country: string }>();
+const clientIp = (req: any): string => {
+    const fwd = (req.headers['x-forwarded-for'] as string || '').split(',')[0].trim();
+    return fwd || req.ip || req.socket?.remoteAddress || '';
+};
+app.get('/api/geo', async (req: any, res) => {
+    const ip = clientIp(req);
+    const isPrivate = !ip || ip === '::1' || ip.startsWith('127.') || ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('::ffff:127.') || ip.startsWith('172.');
+    if (geoCache.has(ip)) return res.json(geoCache.get(ip));
+    if (isPrivate) return res.json({ region: 'EG', country: '', note: 'private-ip' });
+    try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 3500);
+        const r = await fetch(`http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,countryCode`, { signal: ctrl.signal });
+        clearTimeout(timer);
+        const d: any = await r.json();
+        const country = d?.status === 'success' ? d.countryCode : '';
+        const region = country === 'EG' ? 'EG' : 'SA';
+        const out = { region, country };
+        if (country) geoCache.set(ip, out);
+        res.json(out);
+    } catch {
+        res.json({ region: 'EG', country: '', note: 'lookup-failed' });
     }
 });
 

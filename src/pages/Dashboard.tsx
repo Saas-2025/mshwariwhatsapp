@@ -1,17 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Smartphone, MessageSquare, Send, Bot, Inbox, Activity, BarChart3, PieChart, Crown, CreditCard, ArrowLeft } from 'lucide-react';
+import { detectRegion, regionPrice, Region } from '../lib/region';
 
 const baseUrl = () => (import.meta.env.VITE_API_URL || 'http://localhost:3050').replace(/\/$/, '');
 
 const Dashboard = () => {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [region, setRegion] = useState<Region>('EG');
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 
   useEffect(() => {
     (async () => {
       try {
+        setRegion(await detectRegion());
         const res = await fetch(`${baseUrl()}/api/dashboard`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
         if (res.ok) setData(await res.json());
       } catch { /* ignore */ } finally { setLoading(false); }
@@ -60,7 +63,7 @@ const Dashboard = () => {
                   <div className="flex items-center gap-2 text-emerald-100 text-sm font-bold mb-1"><Crown size={16} className="text-amber-300" /> باقتك الحالية</div>
                   <h3 className="text-2xl font-extrabold">{data.plan.name}</h3>
                   <p className="text-emerald-100 text-sm mt-1">
-                    {data.plan.priceMonthly > 0 ? `${Number(data.plan.priceMonthly).toLocaleString('en-US')} ${data.plan.currency} / شهرياً` : 'باقة مجانية'}
+                    {(() => { const pr = regionPrice(data.plan, region, 'monthly'); return pr.amount > 0 ? `${pr.amount.toLocaleString('en-US')} ${pr.currency} / شهرياً` : 'باقة مجانية'; })()}
                   </p>
                 </div>
 

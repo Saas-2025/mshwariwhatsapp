@@ -2,9 +2,12 @@ import mongoose, { Document, Schema } from 'mongoose';
 
 export interface IPlan extends Document {
     name: string;
-    priceMonthly: number;
-    priceYearly: number;
-    currency: string;
+    priceMonthly: number;         // Egypt monthly
+    priceYearly: number;          // Egypt yearly
+    currency: string;             // Egypt currency
+    priceMonthlySA: number;       // Saudi monthly
+    priceYearlySA: number;        // Saudi yearly
+    currencySA: string;           // Saudi currency
     maxSessions: number;          // 0 = unlimited
     maxConversations: number;     // monthly, 0 = unlimited
     maxCampaignMessages: number;  // monthly, 0 = unlimited
@@ -21,6 +24,9 @@ const PlanSchema = new Schema<IPlan>({
     priceMonthly: { type: Number, default: 0 },
     priceYearly: { type: Number, default: 0 },
     currency: { type: String, default: 'ج.م' },
+    priceMonthlySA: { type: Number, default: 0 },
+    priceYearlySA: { type: Number, default: 0 },
+    currencySA: { type: String, default: 'ر.س' },
     maxSessions: { type: Number, default: 1 },
     maxConversations: { type: Number, default: 0 },
     maxCampaignMessages: { type: Number, default: 0 },
