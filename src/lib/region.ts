@@ -11,12 +11,9 @@ export const CONTACTS = {
   SA: { label: 'السعودية', flag: '🇸🇦', phone: '966534859975', display: '+966 53 485 9975' },
 };
 
-// Resolve the pricing region. A manual override (localStorage) always wins,
-// otherwise we ask the backend to geo-locate the IP (cached for the session).
+// Resolve the pricing region purely from the visitor's IP country (cached for the session).
+// Egypt (EG) => Egyptian pricing, everywhere else => Saudi pricing.
 export async function detectRegion(): Promise<Region> {
-  const manual = localStorage.getItem('priceRegion');
-  if (manual === 'EG' || manual === 'SA') return manual;
-
   const cached = sessionStorage.getItem('autoRegion');
   if (cached === 'EG' || cached === 'SA') return cached;
 
@@ -30,10 +27,6 @@ export async function detectRegion(): Promise<Region> {
     }
   } catch { /* ignore */ }
   return 'EG';
-}
-
-export function setManualRegion(r: Region) {
-  localStorage.setItem('priceRegion', r);
 }
 
 // Pick {amount, currency} for a plan in the given region + billing cycle.

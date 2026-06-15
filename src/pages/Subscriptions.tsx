@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Check, Smartphone, MessageSquare, Megaphone, CalendarClock, Sparkles, Crown, Star, X, MessageCircle, Globe } from 'lucide-react';
-import { detectRegion, regionPrice, setManualRegion, CONTACTS, Region } from '../lib/region';
+import { Check, Smartphone, MessageSquare, Megaphone, CalendarClock, Sparkles, Crown, Star, X, MessageCircle } from 'lucide-react';
+import { detectRegion, regionPrice, CONTACTS, Region } from '../lib/region';
 
 const baseUrl = () => (import.meta.env.VITE_API_URL || 'http://localhost:3050').replace(/\/$/, '');
 const fmt = (n: number) => (Number(n) > 0 ? Number(n).toLocaleString('en-US') : 'بلا حدود');
@@ -27,8 +27,6 @@ const Subscriptions = () => {
       } catch { /* ignore */ } finally { setLoading(false); }
     })();
   }, []);
-
-  const switchRegion = (r: Region) => { setManualRegion(r); setRegion(r); };
 
   // WhatsApp deep-link with a prefilled message for the chosen plan
   const waLink = (phone: string, plan: any) => {
@@ -59,16 +57,6 @@ const Subscriptions = () => {
             سنوي
             <span className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold ${cycle === 'yearly' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-600'}`}>وفّر حتى شهرين</span>
           </button>
-        </div>
-
-        {/* Region (currency) toggle */}
-        <div className="flex items-center justify-center gap-2 mt-4 text-sm">
-          <Globe size={15} className="text-slate-400" />
-          <span className="text-slate-400">عرض الأسعار بعملة:</span>
-          <div className="inline-flex items-center bg-slate-100 rounded-lg p-1">
-            <button onClick={() => switchRegion('EG')} className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${region === 'EG' ? 'bg-white shadow text-emerald-600' : 'text-slate-500'}`}>🇪🇬 مصر</button>
-            <button onClick={() => switchRegion('SA')} className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${region === 'SA' ? 'bg-white shadow text-emerald-600' : 'text-slate-500'}`}>🇸🇦 السعودية</button>
-          </div>
         </div>
       </div>
 
