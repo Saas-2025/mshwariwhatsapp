@@ -59,55 +59,55 @@ const Login: React.FC<LoginProps> = ({ onLogin, systemName }) => {
 
     return (
         <div className="min-h-screen flex bg-slate-50" dir={dir}>
-            {/* ===== Brand / features panel (desktop) ===== */}
-            <div className="hidden lg:flex lg:w-[46%] xl:w-[42%] relative overflow-hidden bg-gradient-to-br from-emerald-700 via-emerald-600 to-emerald-800 text-white p-12 flex-col justify-between">
+            {/* ===== Brand / features panel (desktop) — 2/3, centered content ===== */}
+            <div className="hidden lg:flex lg:w-2/3 relative overflow-hidden bg-gradient-to-br from-emerald-700 via-emerald-600 to-emerald-800 text-white p-12 flex-col items-center justify-center text-center">
                 <div className="absolute -top-24 -left-24 w-96 h-96 bg-white/10 rounded-full blur-2xl" />
                 <div className="absolute bottom-0 -right-20 w-80 h-80 bg-emerald-400/20 rounded-full blur-2xl" />
 
-                {/* Logo */}
-                <div className="relative">
-                    <div className="inline-flex items-center justify-center bg-white rounded-2xl p-3 shadow-xl mb-5">
+                <div className="relative w-full max-w-md flex flex-col items-center">
+                    {/* Logo (bigger + clearer) */}
+                    <div className="inline-flex items-center justify-center bg-white rounded-3xl p-6 shadow-2xl mb-7">
                         {!logoBroken
-                            ? <img src="/logo.png" alt={systemName} onError={() => setLogoBroken(true)} className="max-h-20 object-contain" />
-                            : <BrandMark className="w-16 h-16" />}
+                            ? <img src="/logo.png" alt={systemName} onError={() => setLogoBroken(true)} className="max-h-36 w-auto object-contain" />
+                            : <BrandMark className="w-28 h-28" />}
                     </div>
-                    <h1 className="text-3xl font-extrabold tracking-tight">{systemName}</h1>
-                    <p className="text-emerald-50/90 mt-2 max-w-sm leading-relaxed">منصّتك المتكاملة للرد الآلي بالذكاء الاصطناعي وإدارة حملات واتساب وفيسبوك باحتراف.</p>
-                </div>
+                    <h1 className="text-4xl font-extrabold tracking-tight">{systemName}</h1>
+                    <p className="text-emerald-50/90 mt-3 leading-relaxed max-w-sm">منصّتك المتكاملة للرد الآلي بالذكاء الاصطناعي وإدارة حملات واتساب وفيسبوك باحتراف.</p>
 
-                {/* Features */}
-                <div className="relative space-y-3.5 my-8">
-                    {FEATURES.map((f, i) => (
-                        <div key={i} className="flex items-center gap-3">
-                            <span className="w-9 h-9 rounded-xl bg-white/15 backdrop-blur flex items-center justify-center shrink-0"><f.icon size={18} /></span>
-                            <span className="text-sm text-emerald-50/95">{f.text}</span>
+                    {/* Features (centered) */}
+                    <div className="space-y-3 my-9 w-full">
+                        {FEATURES.map((f, i) => (
+                            <div key={i} className="flex items-center justify-center gap-3">
+                                <span className="w-9 h-9 rounded-xl bg-white/15 backdrop-blur flex items-center justify-center shrink-0"><f.icon size={18} /></span>
+                                <span className="text-sm text-emerald-50/95">{f.text}</span>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Contacts (centered) */}
+                    <div className="w-full">
+                        <p className="text-xs font-bold text-emerald-100/80 mb-3 flex items-center justify-center gap-2"><MessageCircle size={14} /> للاشتراك والدعم تواصل معنا</p>
+                        <div className="flex flex-col sm:flex-row gap-3 justify-center max-w-md mx-auto">
+                            {(['EG', 'SA'] as const).map(r => {
+                                const c = CONTACTS[r];
+                                return (
+                                    <a key={r} href={`https://wa.me/${c.phone}`} target="_blank" rel="noreferrer"
+                                        className="flex items-center gap-2.5 bg-white/10 hover:bg-white/20 transition-colors rounded-xl px-3.5 py-2.5 flex-1 text-right">
+                                        <span className="text-xl">{c.flag}</span>
+                                        <span className="leading-tight">
+                                            <span className="block text-[11px] text-emerald-100/80">إدارة {c.label}</span>
+                                            <span className="block text-sm font-bold" dir="ltr">{c.display}</span>
+                                        </span>
+                                    </a>
+                                );
+                            })}
                         </div>
-                    ))}
-                </div>
-
-                {/* Contacts */}
-                <div className="relative">
-                    <p className="text-xs font-bold text-emerald-100/80 mb-3 flex items-center gap-2"><MessageCircle size={14} /> للاشتراك والدعم تواصل معنا</p>
-                    <div className="flex flex-col sm:flex-row gap-3">
-                        {(['EG', 'SA'] as const).map(r => {
-                            const c = CONTACTS[r];
-                            return (
-                                <a key={r} href={`https://wa.me/${c.phone}`} target="_blank" rel="noreferrer"
-                                    className="flex items-center gap-2.5 bg-white/10 hover:bg-white/20 transition-colors rounded-xl px-3.5 py-2.5 flex-1">
-                                    <span className="text-xl">{c.flag}</span>
-                                    <span className="leading-tight">
-                                        <span className="block text-[11px] text-emerald-100/80">إدارة {c.label}</span>
-                                        <span className="block text-sm font-bold" dir="ltr">{c.display}</span>
-                                    </span>
-                                </a>
-                            );
-                        })}
                     </div>
                 </div>
             </div>
 
-            {/* ===== Form panel ===== */}
-            <div className="flex-1 flex items-center justify-center p-4 relative overflow-hidden">
+            {/* ===== Form panel — 1/3 (left) ===== */}
+            <div className="flex-1 lg:w-1/3 flex items-center justify-center p-4 relative overflow-hidden">
                 <div className="absolute -top-24 -right-24 w-80 h-80 bg-emerald-100/50 rounded-full blur-3xl lg:hidden" />
                 <div className="relative w-full max-w-md">
                     {/* Mobile logo */}
