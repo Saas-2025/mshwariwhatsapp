@@ -1,5 +1,5 @@
 import { connectDB } from './db.js';
-import { User, Session, Contact, Message, MutedChat, Setting, ScheduledCampaign, AuthState, AIAgent, ChatLog, FacebookConnection, ChatSettings, Plan, SupportTicket } from '../models/index.js';
+import { User, Session, Contact, Message, MutedChat, Setting, ScheduledCampaign, AuthState, AIAgent, ChatLog, FacebookConnection, ChatSettings, Plan, SupportTicket, Campaign } from '../models/index.js';
 import { AutoReply } from '../models/AutoReply.js';
 
 class MongoStorage {
@@ -35,6 +35,7 @@ class MongoStorage {
             case 'chat_settings': return ChatSettings;
             case 'plans': return Plan;
             case 'support_tickets': return SupportTicket;
+            case 'campaigns': return Campaign;
             default: throw new Error(`Unknown collection: ${collection}`);
         }
     }

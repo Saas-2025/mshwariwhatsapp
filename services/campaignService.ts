@@ -1,4 +1,5 @@
 import { WhatsAppEngine } from './whatsappEngine.js';
+import { storage } from './storage.js';
 
 interface ActiveSession {
     id: string;
@@ -131,6 +132,27 @@ export class CampaignService {
             }
         }
 
+        const cancelled = this.activeCampaigns.get(sessionId) === false;
+        this.activeCampaigns.delete(sessionId);
+
         socket.emit('message-complete', { sessionId, success: successCount, failed: failCount });
+
+        // Persist a history record so past campaigns can be reviewed + filtered
+        try {
+            const sessionRec = await storage.getItem('sessions', { id: sessionId });
+            await storage.saveItem('campaigns', {
+                userId,
+                sessionId,
+                sessionName: sessionRec?.name || sessionId,
+                type,
+                preview: String((type === 'text' ? content : (caption || `[${type}]`)) || '').slice(0, 160),
+                total: uniqueNumbers.length,
+                success: successCount,
+                failed: failCount,
+                status: cancelled ? 'stopped' : 'completed'
+            });
+        } catch (e: any) {
+            console.error('[Campaign] Failed to save history:', e?.message || e);
+        }
     }
 }

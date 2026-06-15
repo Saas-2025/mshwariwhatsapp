@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Smartphone, RefreshCw, QrCode, CheckCircle2, Plus, X, ChevronLeft } from 'lucide-react';
+import { Smartphone, RefreshCw, QrCode, CheckCircle2, Plus, X, ChevronLeft, Search, LayoutGrid, List as ListIcon } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
 interface Session {
@@ -22,6 +22,9 @@ const Devices: React.FC<DevicesProps> = ({ socket }) => {
     const [newSessionName, setNewSessionName] = useState('');
     const [loading, setLoading] = useState(false);
     const [filter, setFilter] = useState<'all' | 'connected' | 'offline'>('all');
+    const [search, setSearch] = useState('');
+    const [view, setView] = useState<'grid' | 'list'>(() => (localStorage.getItem('devicesView') as 'grid' | 'list') || 'grid');
+    const setViewPersist = (v: 'grid' | 'list') => { setView(v); localStorage.setItem('devicesView', v); };
 
     useEffect(() => {
         if (!socket) return;
@@ -81,7 +84,12 @@ const Devices: React.FC<DevicesProps> = ({ socket }) => {
         connected: sessions.filter(s => s.status === 'CONNECTED').length,
         offline: sessions.filter(s => s.status !== 'CONNECTED').length,
     };
-    const visible = sessions.filter(s => filter === 'all' ? true : filter === 'connected' ? s.status === 'CONNECTED' : s.status !== 'CONNECTED');
+    const q = search.trim().toLowerCase();
+    const visible = sessions.filter(s => {
+        const matchFilter = filter === 'all' ? true : filter === 'connected' ? s.status === 'CONNECTED' : s.status !== 'CONNECTED';
+        const matchSearch = !q || (s.name || '').toLowerCase().includes(q) || (s.ownerName || '').toLowerCase().includes(q);
+        return matchFilter && matchSearch;
+    });
     const filterTabs: { id: typeof filter; label: string; count: number }[] = [
         { id: 'all', label: 'الكل', count: counts.all },
         { id: 'connected', label: 'متصل', count: counts.connected },
@@ -101,14 +109,27 @@ const Devices: React.FC<DevicesProps> = ({ socket }) => {
             </div>
 
             {sessions.length > 0 && (
-                <div className="inline-flex bg-white border border-slate-200 rounded-xl p-1 shadow-sm">
-                    {filterTabs.map(t => (
-                        <button key={t.id} onClick={() => setFilter(t.id)}
-                            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${filter === t.id ? 'bg-emerald-500 text-white shadow' : 'text-slate-500 hover:text-slate-700'}`}>
-                            {t.label}
-                            <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${filter === t.id ? 'bg-white/20' : 'bg-slate-100 text-slate-500'}`}>{t.count}</span>
-                        </button>
-                    ))}
+                <div className="flex flex-col md:flex-row md:items-center gap-3 justify-between">
+                    <div className="inline-flex bg-white border border-slate-200 rounded-xl p-1 shadow-sm w-fit">
+                        {filterTabs.map(t => (
+                            <button key={t.id} onClick={() => setFilter(t.id)}
+                                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${filter === t.id ? 'bg-emerald-500 text-white shadow' : 'text-slate-500 hover:text-slate-700'}`}>
+                                {t.label}
+                                <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${filter === t.id ? 'bg-white/20' : 'bg-slate-100 text-slate-500'}`}>{t.count}</span>
+                            </button>
+                        ))}
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="relative flex-1 md:w-64">
+                            <Search size={16} className="absolute right-3 top-2.5 text-slate-400" />
+                            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="بحث باسم الجهاز أو المالك..."
+                                className="w-full bg-white border border-slate-200 rounded-xl py-2.5 pr-9 pl-3 text-sm shadow-sm focus:outline-none focus:border-emerald-500" />
+                        </div>
+                        <div className="inline-flex bg-white border border-slate-200 rounded-xl p-1 shadow-sm shrink-0">
+                            <button onClick={() => setViewPersist('grid')} className={`p-2 rounded-lg transition-colors ${view === 'grid' ? 'bg-emerald-500 text-white' : 'text-slate-400 hover:text-slate-600'}`} title="عرض شبكي"><LayoutGrid size={18} /></button>
+                            <button onClick={() => setViewPersist('list')} className={`p-2 rounded-lg transition-colors ${view === 'list' ? 'bg-emerald-500 text-white' : 'text-slate-400 hover:text-slate-600'}`} title="عرض قائمة"><ListIcon size={18} /></button>
+                        </div>
+                    </div>
                 </div>
             )}
 
@@ -119,7 +140,7 @@ const Devices: React.FC<DevicesProps> = ({ socket }) => {
                     <p className="text-slate-500 mb-8 max-w-sm mx-auto">أضف جهازك الأول للبدء.</p>
                     <button onClick={() => setShowAddModal(true)} className="bg-emerald-50 text-emerald-600 font-bold py-3 px-8 rounded-xl hover:bg-emerald-100 transition-all border-2 border-emerald-100">إضافة جهاز</button>
                 </div>
-            ) : (
+            ) : view === 'grid' ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {visible.map(session => {
                         const meta = statusMeta(session.status);
@@ -158,7 +179,38 @@ const Devices: React.FC<DevicesProps> = ({ socket }) => {
                             </div>
                         );
                     })}
-                    {visible.length === 0 && <div className="col-span-full py-12 text-center text-slate-400 bg-white rounded-2xl border border-dashed border-slate-300">لا توجد أجهزة في هذا التصنيف.</div>}
+                    {visible.length === 0 && <div className="col-span-full py-12 text-center text-slate-400 bg-white rounded-2xl border border-dashed border-slate-300">لا توجد أجهزة مطابقة.</div>}
+                </div>
+            ) : (
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm divide-y divide-slate-100 overflow-hidden">
+                    {visible.map(session => {
+                        const meta = statusMeta(session.status);
+                        const isOffline = !session.status || session.status === 'IDLE' || session.status === 'ERROR' || session.status === 'disconnected';
+                        return (
+                            <div key={session.id} onClick={() => navigate(`/devices/${session.id}`)}
+                                className="flex items-center gap-4 p-4 hover:bg-slate-50 cursor-pointer transition-colors">
+                                <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${meta.ring}`}>
+                                    {session.status === 'CONNECTED' ? <CheckCircle2 size={22} /> : session.status === 'QR' ? <QrCode size={22} /> : <Smartphone size={22} />}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <h3 className="font-bold text-slate-800 truncate">{session.name}</h3>
+                                        {session.ownerName && <span className="text-[10px] bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full border border-purple-100">المالك: {session.ownerName}</span>}
+                                    </div>
+                                    <p className="text-xs font-mono text-slate-400 truncate" dir="ltr">{session.id}</p>
+                                </div>
+                                <div className={`px-3 py-1 rounded-full text-xs font-bold items-center gap-1.5 hidden sm:flex shrink-0 ${meta.chip}`}>
+                                    <div className={`w-2 h-2 rounded-full ${meta.dot} ${session.status === 'CONNECTED' ? 'animate-pulse' : ''}`} />{meta.label}
+                                </div>
+                                {isOffline ? (
+                                    <button onClick={(e) => handleStart(e, session.id)} className="py-2 px-4 bg-emerald-500 text-white rounded-xl text-sm font-bold hover:bg-emerald-600 transition-colors shrink-0">ربط</button>
+                                ) : (
+                                    <button onClick={(e) => { e.stopPropagation(); navigate(`/devices/${session.id}`); }} className="py-2 px-4 bg-emerald-50 text-emerald-600 rounded-xl text-sm font-bold hover:bg-emerald-100 transition-colors shrink-0 flex items-center gap-1">فتح <ChevronLeft size={16} /></button>
+                                )}
+                            </div>
+                        );
+                    })}
+                    {visible.length === 0 && <div className="py-12 text-center text-slate-400">لا توجد أجهزة مطابقة.</div>}
                 </div>
             )}
 

@@ -1500,6 +1500,21 @@ app.get('/api/sessions/:sessionId/analytics', authenticateToken, async (req: any
     }
 });
 
+// Sent-campaigns history (user sees own, admin sees all + owner name)
+app.get('/api/campaigns', authenticateToken, async (req: any, res) => {
+    try {
+        const isAdmin = req.user.role === 'admin';
+        const all = await storage.getItems('campaigns');
+        const list = isAdmin ? all : all.filter((c: any) => c.userId === req.user.userId);
+        if (isAdmin) {
+            const byId: Record<string, string> = {};
+            (await storage.getItems('users')).forEach((u: any) => { byId[u._id] = u.name; });
+            list.forEach((c: any) => { c.ownerName = byId[c.userId] || '—'; });
+        }
+        res.json(list);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // --- Scheduled Campaigns Routes ---
 
 // List Campaigns

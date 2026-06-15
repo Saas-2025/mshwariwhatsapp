@@ -93,6 +93,8 @@ const MessageSender: React.FC<MessageSenderProps> = ({ socket, status }) => {
             try {
                 setDebugLog(prev => [`[Complete] Success: ${data.success}`, ...prev]);
                 setSending(false);
+                // Let the campaign-history panel know to refresh
+                window.dispatchEvent(new Event('campaign-complete'));
                 alert(`تم الانتهاء! نجاح: ${data.success}, فشل: ${data.failed}`);
             } catch (err) {
                 console.error('Error in handleComplete:', err);
