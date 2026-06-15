@@ -206,11 +206,12 @@ const Users = () => {
             {error && <div className="bg-red-50 text-red-500 p-3 rounded-xl flex items-center gap-2"><AlertCircle size={16} /> {error}</div>}
             {success && <div className="bg-emerald-50 text-emerald-500 p-3 rounded-xl flex items-center gap-2"><CheckCircle size={16} /> {success}</div>}
 
-            {/* Create */}
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+            {/* Create (1/3 — right) */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm lg:col-span-1">
                 <h3 className="text-lg font-bold text-slate-700 mb-4 flex items-center gap-2"><UserPlus size={20} className="text-emerald-500" /> إضافة مستخدم جديد</h3>
                 <form onSubmit={handleCreateUser} className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 gap-4">
                         <input type="text" placeholder="الاسم" value={createForm.name} onChange={e => setCreateForm({ ...createForm, name: e.target.value })} className="bg-slate-50 border border-slate-200 p-3 rounded-xl" required />
                         <input type="text" placeholder="اسم المستخدم" value={createForm.username} onChange={e => setCreateForm({ ...createForm, username: e.target.value })} className="bg-slate-50 border border-slate-200 p-3 rounded-xl" required />
                         <input type="password" placeholder="كلمة المرور" value={createForm.password} onChange={e => setCreateForm({ ...createForm, password: e.target.value })} className="bg-slate-50 border border-slate-200 p-3 rounded-xl" required />
@@ -224,8 +225,8 @@ const Users = () => {
                 </form>
             </div>
 
-            {/* List */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            {/* List (2/3 — left) */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden lg:col-span-2">
                 <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
                     <div className="relative flex-1 max-w-xs">
                         <Search size={16} className="absolute right-3 top-3 text-slate-400" />
@@ -291,6 +292,7 @@ const Users = () => {
                         </tbody>
                     </table>
                 </div>
+            </div>
             </div>
 
             {/* Edit Modal */}

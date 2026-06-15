@@ -15,6 +15,7 @@ import Subscriptions from './src/pages/Subscriptions';
 import Support from './src/pages/Support';
 import { Menu } from 'lucide-react';
 import { useLang } from './src/i18n';
+import { BrandMark } from './src/components/Logo';
 
 const App = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
@@ -118,6 +119,7 @@ const App = () => {
           {/* Mobile Header */}
           <div className="md:hidden bg-emerald-900 text-white p-4 flex justify-between items-center sticky top-0 z-30 shadow-md">
             <h1 className="text-xl font-bold flex items-center gap-2">
+              <span className="w-8 h-8 rounded-lg bg-white flex items-center justify-center shrink-0"><BrandMark className="w-6 h-6" /></span>
               {systemName}
             </h1>
             <button onClick={() => setIsSidebarOpen(true)}>

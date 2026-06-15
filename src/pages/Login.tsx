@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogIn, User, Lock, AlertCircle, Bot, Eye, EyeOff } from 'lucide-react';
+import { LogIn, User, Lock, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { useLang } from '../i18n';
+import { BrandMark } from '../components/Logo';
 
 interface LoginProps {
     onLogin: () => void;
@@ -15,6 +16,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, systemName }) => {
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const [logoBroken, setLogoBroken] = useState(false);
     const navigate = useNavigate();
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -71,10 +73,17 @@ const Login: React.FC<LoginProps> = ({ onLogin, systemName }) => {
             <div className="relative w-full max-w-md">
                 {/* Brand */}
                 <div className="text-center mb-8">
-                    <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-lg shadow-emerald-500/30 mb-4">
-                        <Bot className="w-9 h-9 text-white" />
-                    </div>
-                    <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">{systemName}</h1>
+                    {!logoBroken ? (
+                        <img src="/logo.png" alt={systemName} onError={() => setLogoBroken(true)}
+                            className="mx-auto max-h-44 object-contain mb-3" />
+                    ) : (
+                        <>
+                            <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-white shadow-lg shadow-emerald-500/20 border border-emerald-100 mb-4">
+                                <BrandMark className="w-14 h-14" />
+                            </div>
+                            <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">{systemName}</h1>
+                        </>
+                    )}
                     <p className="text-slate-500 mt-1">{t('login_subtitle')}</p>
                 </div>
 

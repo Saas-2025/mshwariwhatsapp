@@ -2,6 +2,7 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { Send, Users, Settings, LogOut, Smartphone, X, Calendar, ChevronRight, Globe, LayoutDashboard, CreditCard, LifeBuoy } from 'lucide-react';
 import { useLang } from '../../i18n';
+import { BrandMark } from '../Logo';
 
 interface SidebarProps {
     onLogout: () => void;
@@ -66,7 +67,8 @@ const Sidebar: React.FC<SidebarProps> = ({ onLogout, isOpen, onClose, systemName
                 ${collapsed ? 'md:translate-x-full' : 'md:translate-x-0'} md:shadow-none
             `}>
                 <div className="p-6 border-b border-emerald-800 flex justify-between items-center">
-                    <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+                    <h1 className="text-2xl font-bold text-white flex items-center gap-2.5">
+                        <span className="w-9 h-9 rounded-lg bg-white flex items-center justify-center shrink-0"><BrandMark className="w-7 h-7" /></span>
                         {systemName}
                     </h1>
                     <div className="flex items-center gap-1">
