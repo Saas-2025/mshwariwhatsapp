@@ -9,6 +9,7 @@ import Devices from './src/pages/Devices';
 import Campaigns from './src/pages/Campaigns';
 import ScheduledCampaigns from './src/pages/ScheduledCampaigns';
 import SessionDetail from './src/pages/SessionDetail';
+import Dashboard from './src/pages/Dashboard';
 import Settings from './src/pages/Settings';
 import { Menu } from 'lucide-react';
 import { useLang } from './src/i18n';
@@ -149,7 +150,7 @@ const App = () => {
         }} />} />
 
         <Route element={<DashboardLayout />}>
-          <Route path="/" element={<Navigate to="/campaigns" replace />} />
+          <Route path="/" element={<Dashboard />} />
           <Route path="/devices" element={<Devices socket={socket} />} />
           <Route path="/devices/:sessionId" element={<SessionDetail socket={socket} />} />
           <Route path="/campaigns" element={<Campaigns socket={socket} />} />

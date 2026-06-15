@@ -11,6 +11,7 @@ export interface ISession extends Document {
   webhooks?: { name: string; url: string }[]; // New: Named Webhooks
   autoReplyEnabled?: boolean; // Toggles all auto-replies for this session
   saveConversations?: boolean; // If false, this session's chats are not stored (no logs/analytics/memory)
+  aiApiKey?: string; // Public key letting an external website use this session's AI
   createdAt?: string;
   updatedAt?: string;
 }
@@ -43,7 +44,8 @@ const SessionSchema = new Schema<ISession>({
   saveConversations: {
     type: Boolean,
     default: true
-  }
+  },
+  aiApiKey: { type: String, default: '', index: true }
 }, {
   timestamps: true
 });

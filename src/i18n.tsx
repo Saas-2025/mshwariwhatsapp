@@ -4,6 +4,7 @@ export type Lang = 'ar' | 'en';
 
 // Shell/common translations. Page bodies can adopt t() incrementally.
 const dict: Record<string, { ar: string; en: string }> = {
+  dashboard: { ar: 'الرئيسية', en: 'Dashboard' },
   devices: { ar: 'الأجهزة المتصلة', en: 'Devices' },
   campaigns: { ar: 'إرسال الحملات', en: 'Campaigns' },
   scheduled: { ar: 'جدولة الحملات', en: 'Scheduled' },

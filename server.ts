@@ -20,6 +20,7 @@ import { ChatLog } from './models/index.js';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { randomUUID } from 'crypto';
 
 dotenv.config({ path: '.env.local' });
 
@@ -1574,6 +1575,150 @@ app.delete('/api/scheduled-campaigns/:id', authenticateToken, async (req: any, r
     } catch (error) {
         res.status(500).json({ error: 'Failed to delete campaign' });
     }
+});
+
+// Dashboard overview (KPIs + onboarding state)
+app.get('/api/dashboard', authenticateToken, async (req: any, res) => {
+    try {
+        const isAdmin = req.user.role === 'admin';
+        const sessions = isAdmin ? SessionService.getAllSessions() : SessionService.getUserSessions(req.user.userId);
+        const sessionIds = sessions.map(s => s.id);
+        const connected = sessions.filter(s => s.engine.currentStatus === 'CONNECTED').length;
+
+        const since24 = Math.floor(Date.now() / 1000) - 24 * 3600;
+        const match: any = sessionIds.length ? { sessionId: { $in: sessionIds } } : { sessionId: '__none__' };
+        const totalsAgg = await ChatLog.aggregate([
+            { $match: match },
+            {
+                $group: {
+                    _id: null,
+                    messages: { $sum: 1 },
+                    incoming: { $sum: { $cond: [{ $eq: ['$role', 'user'] }, 1, 0] } },
+                    replies: { $sum: { $cond: [{ $eq: ['$role', 'assistant'] }, 1, 0] } },
+                    aiReplies: { $sum: { $cond: [{ $eq: ['$source', 'ai'] }, 1, 0] } },
+                    today: { $sum: { $cond: [{ $gte: ['$timestamp', since24] }, 1, 0] } }
+                }
+            }
+        ]);
+        const t = totalsAgg[0] || { messages: 0, incoming: 0, replies: 0, aiReplies: 0, today: 0 };
+        const uniqueChats = sessionIds.length ? (await ChatLog.distinct('remoteJid', match)).length : 0;
+
+        const firstSession = sessions[0];
+        let hasAgent = false, hasKnowledge = false, hasGroq = !!process.env.GROQ_API_KEY;
+        if (firstSession) {
+            const agent = await storage.getItem('aiagent', { sessionId: firstSession.id });
+            hasAgent = !!(agent && agent.isActive);
+            hasKnowledge = !!(agent && (((agent.knowledgeBase || []).length) || ((agent.documents || []).length)));
+            if (agent && (agent.groqKeys || []).length) hasGroq = true;
+        }
+
+        res.json({
+            devices: sessions.length,
+            connected,
+            conversations: uniqueChats,
+            messages: t.messages,
+            incoming: t.incoming,
+            replies: t.replies,
+            aiReplies: t.aiReplies,
+            today: t.today,
+            onboarding: { hasDevice: sessions.length > 0, hasConnected: connected > 0, hasAgent, hasGroq, hasKnowledge }
+        });
+    } catch (e: any) {
+        console.error('[Dashboard] error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ============================================================
+// AI Website API — let an external site use a session's AI agent
+// ============================================================
+
+const aiAskLimiter = new Map<string, { count: number; resetAt: number }>();
+const genWebKey = () => 'wsk_' + randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '').slice(0, 8);
+
+// Get (or lazily create) the session's website AI key
+app.get('/api/sessions/:sessionId/ai-key', authenticateToken, async (req: any, res) => {
+    const { sessionId } = req.params;
+    const session = await storage.getItem('sessions', { id: sessionId });
+    if (!session || (session.userId !== req.user.userId && req.user.role !== 'admin')) {
+        return res.status(404).json({ error: 'Session not found or access denied' });
+    }
+    try {
+        if (!session.aiApiKey) {
+            session.aiApiKey = genWebKey();
+            const upd: any = { ...session };
+            if (upd._id) delete upd._id;
+            delete upd.createdAt; delete upd.updatedAt;
+            await storage.saveItem('sessions', upd);
+        }
+        res.json({ apiKey: session.aiApiKey });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/sessions/:sessionId/ai-key/regenerate', authenticateToken, async (req: any, res) => {
+    const { sessionId } = req.params;
+    const session = await storage.getItem('sessions', { id: sessionId });
+    if (!session || (session.userId !== req.user.userId && req.user.role !== 'admin')) {
+        return res.status(404).json({ error: 'Session not found or access denied' });
+    }
+    try {
+        const upd: any = { ...session, aiApiKey: genWebKey() };
+        if (upd._id) delete upd._id;
+        delete upd.createdAt; delete upd.updatedAt;
+        await storage.saveItem('sessions', upd);
+        res.json({ apiKey: upd.aiApiKey });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// PUBLIC: ask the session's AI a question (website widgets / external sites)
+app.post('/api/ai/ask', async (req: any, res) => {
+    try {
+        const key = String(req.headers['x-api-key'] || req.body.apiKey || '');
+        const question = req.body.question;
+        const conversationId = req.body.conversationId;
+        if (!key) return res.status(401).json({ error: 'Missing API key' });
+        if (!question || !String(question).trim()) return res.status(400).json({ error: 'Missing question' });
+
+        const now = Date.now();
+        let rl = aiAskLimiter.get(key);
+        if (!rl || now > rl.resetAt) { rl = { count: 0, resetAt: now + 60000 }; aiAskLimiter.set(key, rl); }
+        rl.count++;
+        if (rl.count > 30) return res.status(429).json({ error: 'Too many requests, slow down.' });
+
+        const session = await storage.getItem('sessions', { aiApiKey: key });
+        if (!session) return res.status(403).json({ error: 'Invalid API key' });
+
+        const agent = await storage.getItem('aiagent', { sessionId: session.id });
+        if (!agent) return res.status(400).json({ error: 'AI agent not configured for this session' });
+
+        const remoteJid = `web:${String(conversationId || 'anon').slice(0, 64)}`;
+        const rows = await ChatLog.find({ sessionId: session.id, remoteJid }).sort({ timestamp: -1 }).limit(12).lean();
+        const history = rows.reverse().map((r: any) => ({ role: r.role, text: r.text }));
+
+        const answer = await getAIResponse({ ...agent, isActive: true } as any, String(question), history as any);
+        if (!answer) return res.status(502).json({ error: 'AI did not return a reply (check Groq key / limits).' });
+
+        if (session.saveConversations !== false) {
+            const ts = Math.floor(Date.now() / 1000);
+            await ChatLog.create({ sessionId: session.id, userId: session.userId, remoteJid, role: 'user', text: String(question).slice(0, 4000), source: 'manual', timestamp: ts });
+            await ChatLog.create({ sessionId: session.id, userId: session.userId, remoteJid, role: 'assistant', text: answer.slice(0, 4000), source: 'ai', timestamp: ts });
+        }
+
+        res.json({ answer });
+    } catch (e: any) {
+        console.error('[AI Ask] error:', e);
+        res.status(500).json({ error: 'Internal error' });
+    }
+});
+
+// PUBLIC: basic agent info for the website widget header
+app.get('/api/ai/info', async (req: any, res) => {
+    const key = String(req.headers['x-api-key'] || req.query.apiKey || '');
+    if (!key) return res.status(401).json({ error: 'Missing API key' });
+    const session = await storage.getItem('sessions', { aiApiKey: key });
+    if (!session) return res.status(403).json({ error: 'Invalid API key' });
+    const agent = await storage.getItem('aiagent', { sessionId: session.id });
+    res.json({ name: agent?.name || 'AI', welcomeMessage: agent?.welcomeMessage || 'مرحباً! كيف يمكنني مساعدتك؟' });
 });
 
 // ============================================================

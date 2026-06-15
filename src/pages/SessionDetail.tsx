@@ -50,6 +50,7 @@ const SessionDetail: React.FC<{ socket: any }> = ({ socket }) => {
   const [webhookUrlInput, setWebhookUrlInput] = useState('');
   const [webhooksList, setWebhooksList] = useState<{ name: string; url: string }[]>([]);
   const [settings, setSettings] = useState<{ autoReplyEnabled: boolean; saveConversations: boolean }>({ autoReplyEnabled: true, saveConversations: true });
+  const [aiKey, setAiKey] = useState('');
 
   useEffect(() => {
     if (!socket) return;
@@ -105,6 +106,21 @@ const SessionDetail: React.FC<{ socket: any }> = ({ socket }) => {
       } catch { /* ignore */ }
     })();
   }, [sessionId]);
+
+  // Lazily fetch the website AI key when the API tab is opened
+  useEffect(() => {
+    if (activeTab !== 'api' || aiKey || !sessionId) return;
+    fetch(`${apiBase()}/api/sessions/${sessionId}/ai-key`, { headers: authHeaders() })
+      .then(r => (r.ok ? r.json() : null)).then(d => d && setAiKey(d.apiKey)).catch(() => { });
+  }, [activeTab, aiKey, sessionId]);
+
+  const regenAiKey = async () => {
+    if (!confirm('توليد مفتاح جديد سيوقف المفتاح القديم في أي موقع يستخدمه. متابعة؟')) return;
+    try {
+      const r = await fetch(`${apiBase()}/api/sessions/${sessionId}/ai-key/regenerate`, { method: 'POST', headers: authHeaders() });
+      if (r.ok) setAiKey((await r.json()).apiKey);
+    } catch { /* ignore */ }
+  };
 
   const updateSetting = async (patch: Partial<{ autoReplyEnabled: boolean; saveConversations: boolean }>) => {
     const prev = settings;
@@ -342,6 +358,35 @@ const SessionDetail: React.FC<{ socket: any }> = ({ socket }) => {
   "content": "https://example.com/clip.mp4",
   "caption": "Demo"
 }`}</pre>
+              </div>
+
+              {/* AI Website API */}
+              <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200" dir="rtl">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <h4 className="font-bold text-slate-700 text-sm flex items-center gap-2"><Brain size={16} className="text-emerald-600" /> ربط الذكاء الاصطناعي بموقعك</h4>
+                  <button onClick={regenAiKey} className="text-xs text-slate-500 hover:text-emerald-600 flex items-center gap-1"><RefreshCw size={13} /> مفتاح جديد</button>
+                </div>
+                <p className="text-xs text-slate-500 mb-3">استخدم نفس الـ AI وقواعد المعرفة في موقعك الإلكتروني — أرسل سؤال العميل واستقبل الرد.</p>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">API Key</label>
+                <div className="flex items-center gap-2 mb-3" dir="ltr">
+                  <code className="flex-1 bg-white p-3 rounded-lg border border-slate-200 font-mono text-xs text-slate-700 break-all">{aiKey || '...'}</code>
+                  <button onClick={() => copy(aiKey, 'url')} className="p-3 bg-white border border-slate-200 rounded-lg text-slate-500 hover:text-emerald-500 shrink-0">{copied ? <Check size={18} /> : <Copy size={18} />}</button>
+                </div>
+                <span className="text-xs font-bold bg-emerald-100 text-emerald-700 px-2 py-1 rounded">JavaScript (للموقع)</span>
+                <pre className="mt-2 bg-slate-900 text-slate-50 p-4 rounded-xl text-xs font-mono overflow-x-auto" dir="ltr">{`fetch("${apiBase()}/api/ai/ask", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "x-api-key": "${aiKey || 'YOUR_KEY'}"
+  },
+  body: JSON.stringify({
+    question: "customer question",
+    conversationId: "visitor-123"
+  })
+})
+  .then(r => r.json())
+  .then(d => console.log(d.answer));`}</pre>
+                <p className="text-[11px] text-slate-400 mt-2">conversationId اختياري — استخدم معرّفاً ثابتاً لكل زائر ليتذكّر سياق محادثته.</p>
               </div>
             </div>
           )}
