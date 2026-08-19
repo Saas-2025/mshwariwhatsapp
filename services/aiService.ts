@@ -5,12 +5,14 @@ const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 // Groq decommissioned several models. Auto-map any stored deprecated model to a
 // current one so existing AI agents keep replying without manual reconfiguration.
+const DEFAULT_MODEL = 'llama-3.1-8b-instant';
 const MODEL_MIGRATIONS: Record<string, string> = {
-  'llama3-70b-8192': 'llama-3.3-70b-versatile',
-  'llama3-8b-8192': 'llama-3.1-8b-instant',
-  'mixtral-8x7b-32768': 'llama-3.3-70b-versatile',
-  'llama-3.1-70b-versatile': 'llama-3.3-70b-versatile',
-  'gemma2-9b-it': 'llama-3.1-8b-instant',
+  'llama3-70b-8192': DEFAULT_MODEL,
+  'llama3-8b-8192': DEFAULT_MODEL,
+  'mixtral-8x7b-32768': DEFAULT_MODEL,
+  'llama-3.1-70b-versatile': DEFAULT_MODEL,
+  'llama-3.3-70b-versatile': DEFAULT_MODEL, // decommissioned by Groq → map to a current model
+  'gemma2-9b-it': DEFAULT_MODEL,
 };
 
 function normalizeForMatch(s: string): string {
@@ -106,7 +108,7 @@ export async function getAIResponse(
     systemContent += '\nاكتب الرد مباشرةً بنص الإجابة فقط، ولا تبدأ ردك بكلمة "الإجابة" أو "الجواب" أو "ج:" أو "س:".';
 
     const requestBody = JSON.stringify({
-      model: MODEL_MIGRATIONS[agent.aiModel] || agent.aiModel || 'llama-3.3-70b-versatile',
+      model: MODEL_MIGRATIONS[agent.aiModel] || agent.aiModel || DEFAULT_MODEL,
       messages: [
         { role: 'system', content: systemContent },
         // Prior turns of THIS conversation give the model full context/memory

@@ -27,7 +27,7 @@ const DEFAULT_CONFIG: AIAgentConfig = {
   welcomeMessage: 'مرحباً! كيف يمكنني مساعدتك اليوم؟',
   systemPrompt: 'أنت مساعد ذكي ومفيد.',
   temperature: 0.7,
-  aiModel: 'llama-3.3-70b-versatile',
+  aiModel: 'llama-3.1-8b-instant',
   isActive: false,
   fallbackToAI: true,
   knowledgeBase: [],
@@ -36,10 +36,9 @@ const DEFAULT_CONFIG: AIAgentConfig = {
 };
 
 const MODELS = [
-  { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B — الأذكى (موصى به)' },
-  { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B — الأسرع' },
-  { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B' },
-  { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B' },
+  { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B — سريع وموثوق (افتراضي)' },
+  { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B — الأقوى (إن كان متاحاً لحسابك)' },
+  { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B — متوازن' },
 ];
 
 const baseUrl = () => (import.meta.env.VITE_API_URL || 'http://localhost:3050').replace(/\/$/, '');
