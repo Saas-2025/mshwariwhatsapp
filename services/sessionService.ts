@@ -60,6 +60,14 @@ export class SessionService {
         }
     }
 
+    /**
+     * Close every live socket and flush pending auth-key writes (used on SIGTERM).
+     * Session statuses in the DB are left as-is so the next instance resumes them.
+     */
+    static async shutdownAll(): Promise<void> {
+        await Promise.allSettled(Array.from(this.sessions.values()).map(s => s.engine.shutdown()));
+    }
+
     static getSession(sessionId: string): ActiveSession | undefined {
         return this.sessions.get(sessionId);
     }
