@@ -18,6 +18,7 @@ import { ISession } from './models/Session.js';
 import { ISetting } from './models/Setting.js';
 import { ChatLog } from './models/index.js';
 import dotenv from 'dotenv';
+import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { randomUUID } from 'crypto';
@@ -2504,4 +2505,35 @@ setInterval(() => {
 app.get('/api/health-check', (req, res) => {
     res.status(200).send('OK');
 });
+
+// ---------------------------------------------------------
+// GRACEFUL SHUTDOWN (Render sends SIGTERM on every deploy/restart)
+// ---------------------------------------------------------
+// Close WhatsApp sockets and flush pending encryption-key writes before exiting, so the old
+// instance stops using the session's Signal keys and nothing written in memory is lost.
+// Otherwise recipients can end up with "Waiting for this message".
+let shuttingDown = false;
+const gracefulShutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[Shutdown] ${signal} received. Closing WhatsApp sessions...`);
+
+    // Hard limit so a stuck DB write can't block the restart (Render force-kills after ~30s)
+    setTimeout(() => {
+        console.error('[Shutdown] Timed out, forcing exit.');
+        process.exit(1);
+    }, 15000).unref();
+
+    httpServer.close(); // stop accepting new connections
+    try {
+        await SessionService.shutdownAll();
+        await mongoose.disconnect();
+    } catch (err) {
+        console.error('[Shutdown] Error during shutdown:', err);
+    }
+    console.log('[Shutdown] Done.');
+    process.exit(0);
+};
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 // ---------------------------------------------------------

@@ -80,6 +80,8 @@ export class WhatsAppEngine {
   private decryptionErrorTimer: NodeJS.Timeout | null = null;
   private connectionStabilityTimeout: NodeJS.Timeout | null = null;
   private sentMessageIds = new Set<string>();
+  private isShuttingDown = false;
+  private flushAuth: (() => Promise<void>) | null = null;
 
   constructor(userId: string, sessionId: string) {
     this.userId = userId;
@@ -96,6 +98,7 @@ export class WhatsAppEngine {
    * Initialize Session
    */
   async startSession(onQR: (qr: string) => void, onConnected: () => void, onError?: (reason: any) => void) {
+    if (this.isShuttingDown) return; // e.g. a pending reconnect firing after SIGTERM
     if (this.sock || this.status === 'CONNECTED') {
       console.log(`[Engine] Session ${this.sessionId} is already active/connecting. Ignoring start request.`);
       if (this.status === 'CONNECTED') onConnected();
@@ -117,7 +120,8 @@ export class WhatsAppEngine {
       }
 
       // Use MongoDB Auth Adapter
-      const { state, saveCreds } = await useMongoDBAuthState(this.sessionId);
+      const { state, saveCreds, flush } = await useMongoDBAuthState(this.sessionId);
+      this.flushAuth = flush;
 
       // Create Socket
       this.sock = makeWASocket({
@@ -218,6 +222,14 @@ export class WhatsAppEngine {
           const reason = (lastDisconnect?.error as any)?.output?.statusCode;
           console.log(`[Engine] Connection closed for ${this.sessionId}. Reason: ${reason}`);
 
+          // Closed on purpose for a process restart: don't reconnect and don't wipe auth data
+          if (this.isShuttingDown) {
+            this.sock = null;
+            this.status = 'IDLE';
+            if (this.connectionStabilityTimeout) clearTimeout(this.connectionStabilityTimeout);
+            return;
+          }
+
           if (this.status !== 'ERROR') {
             this.status = 'IDLE';
           }
@@ -279,8 +291,10 @@ export class WhatsAppEngine {
         console.log(`[Engine] Received ${contacts.length} contacts (Phonebook).`);
         if (contacts.length > 0) console.log('[Engine] Sample contact:', JSON.stringify(contacts[0]));
 
+        // Baileys v7 may key contacts by LID; the real number is then in c.phoneNumber
         const validContacts = contacts
-          .filter(c => c.id.includes('@s.whatsapp.net') && !c.id.includes('@lid') && !c.id.includes('@broadcast'))
+          .map(c => ({ ...c, id: c.id?.includes('@s.whatsapp.net') ? c.id : c.phoneNumber }))
+          .filter(c => c.id && c.id.includes('@s.whatsapp.net') && !c.id.includes('@lid') && !c.id.includes('@broadcast'))
           .map(c => ({
             sessionId: this.sessionId,
             id: c.id,
@@ -326,8 +340,11 @@ export class WhatsAppEngine {
             if (isFixCommand) {
               console.log(`[Engine] Manual Repair requested for ${remoteJid}`);
               try {
-                if (this.sock?.signalRepository?.clearSession) {
-                  await this.sock.signalRepository.clearSession(remoteJid);
+                // Baileys v7 exposes deleteSession(jids); older builds had clearSession(jid)
+                const repo = this.sock?.signalRepository;
+                if (repo?.deleteSession || repo?.clearSession) {
+                  if (repo.deleteSession) await repo.deleteSession([remoteJid]);
+                  else await repo.clearSession(remoteJid);
                   await this.send(remoteJid, 'text', '✅ تم إصلاح التشفير لهذا الرقم. يرجى المحاولة مرة أخرى.');
                 }
               } catch (e) {
@@ -509,9 +526,11 @@ export class WhatsAppEngine {
                 const aiActive = !!(agent && agent.isActive) && !aiBlocked;
                 const history = (aiActive && saveConvos) ? await this.buildHistory(remoteJid) : [];
 
-                // Resolve the customer's real phone number: for @lid chats it comes from key.senderPn,
-                // for normal chats it's the JID itself. Stored so campaigns get the real mobile, not the LID.
-                const senderPn = (msg.key as any)?.senderPn as string | undefined;
+                // Resolve the customer's real phone number: for @lid chats it comes from key.remoteJidAlt
+                // (Baileys v7; v6 called it senderPn), for normal chats it's the JID itself.
+                // Stored so campaigns get the real mobile, not the LID.
+                const altJid = (msg.key as any)?.remoteJidAlt || (msg.key as any)?.senderPn;
+                const senderPn = altJid && altJid.includes('@s.whatsapp.net') ? altJid as string : undefined;
                 const senderNumber = senderPn
                     ? senderPn.split('@')[0].replace(/\D/g, '')
                     : (remoteJid.includes('@s.whatsapp.net') ? remoteJid.split('@')[0].replace(/\D/g, '') : '');
@@ -692,7 +711,9 @@ export class WhatsAppEngine {
         // 1. Process Contacts (Phonebook names & PushNames from direct contact sync)
         if (contacts) {
           contacts.forEach((c: any) => {
-            upsertContact(c.id, {
+            const pnId = c.id?.includes('@s.whatsapp.net') ? c.id : c.phoneNumber;
+            if (!pnId) return;
+            upsertContact(pnId, {
               name: c.name || undefined, // Strict name only (Saved Name)
               notify: c.notify, // Push Name (WhatsApp Name) if present
               verifiedName: c.verifiedName
@@ -864,6 +885,29 @@ export class WhatsAppEngine {
     } finally {
       await this.cleanupData();
       this.status = 'IDLE';
+    }
+  }
+
+  /**
+   * Close the socket for a process restart (deploy / SIGTERM) WITHOUT logging out.
+   * The device stays linked and the session status in the DB is untouched, so the next
+   * instance resumes it with the same keys. Pending auth-key writes are flushed first.
+   */
+  async shutdown() {
+    this.isShuttingDown = true;
+    try {
+      if (this.sock) {
+        console.log(`[Engine] Closing socket for ${this.sessionId} (shutdown)...`);
+        await this.sock.end(undefined);
+        this.sock = null;
+      }
+    } catch (err) {
+      console.error(`[Engine] Error closing socket for ${this.sessionId}:`, err);
+    }
+    try {
+      if (this.flushAuth) await this.flushAuth();
+    } catch (err) {
+      console.error(`[Engine] Failed to flush auth keys for ${this.sessionId}:`, err);
     }
   }
 
